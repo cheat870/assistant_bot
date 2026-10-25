@@ -29,6 +29,7 @@ from telegram.request import HTTPXRequest
 from config import BOT_TOKEN
 from database import init_db
 from services.scheduler import setup_scheduler
+from services.health_server import start_health_server
 from handlers.command_handlers import (
     start_command,
     help_command,
@@ -80,6 +81,9 @@ def main():
     # Initialize SQLite Database
     init_db()
     logger.info("Database initialized successfully.")
+    
+    # Start HTTP Health Server for 24/7 Cloud Hosting (Render, Railway, Koyeb)
+    start_health_server()
     
     # Build Telegram Application with generous timeouts for uploading large video files
     request_config = HTTPXRequest(

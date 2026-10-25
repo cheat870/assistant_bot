@@ -81,3 +81,40 @@ python main.py
 - **X / Twitter**
 
 រួច **Paste & Send** ចូលក្នុង Bot ជាការស្រេច! Bot នឹងឆ្លើយតប status និងផ្ញើ file វីដេអូ `.mp4` មកវិញភ្លាមៗ។
+
+---
+
+## 🌐 របៀបដាក់ឱ្យ Bot ដំណើរការ ២៤/៧ (24/7 Cloud Deployment)
+
+ដើម្បីកុំឱ្យ Bot ដាច់នៅពេលអ្នកបិទកុំព្យូទ័រ អ្នកអាច Deploy លើ Cloud ដោយឥតគិតថ្លៃ (Free Tier)៖
+
+### ជម្រើសទី ១: ដាក់លើ Render.com (ឥតគិតថ្លៃ Free)
+1. ចូលទៅកាន់ [render.com](https://render.com) រួចចុះឈ្មោះគណនី (Sign in with GitHub)
+2. ចុច **New +** ➔ ជ្រើសរើស **Web Service**
+3. ភ្ជាប់ជាមួយ Repository របស់អ្នក: `cheat870/assistant_bot`
+4. កំណត់ Settings:
+   - **Environment:** `Python`
+   - **Build Command:** `pip install -r requirements.txt`
+   - **Start Command:** `python main.py`
+5. ក្នុងផ្នែក **Environment Variables** បន្ថែម៖
+   - `TELEGRAM_BOT_TOKEN` = `Token_របស់អ្នក`
+   - `BOT_TIMEZONE` = `Asia/Phnom_Penh`
+6. ចុច **Deploy Web Service** ជាការស្រេច!
+7. *(Optional)* យក URL របស់ Render ទៅដាក់ក្នុង [uptimerobot.com](https://uptimerobot.com) (HTTP Monitor រៀងរាល់ 5 នាទី) ដើម្បីកុំឱ្យ Render Sleep។
+
+---
+
+### ជម្រើសទី ២: ដាក់លើ Koyeb (ឥតគិតថ្លៃ 24/7 Always-On)
+1. ចូលទៅកាន់ [koyeb.com](https://www.koyeb.com)
+2. ចុច **Create App** ➔ ជ្រើសរើស **GitHub** ➔ ជ្រើសរើស `assistant_bot`
+3. ជ្រើសរើស **Dockerfile** builder
+4. បញ្ចូល Environment Variable `TELEGRAM_BOT_TOKEN`
+5. ចុច **Deploy** (ដំណើរការ ២៤ម៉ោង/៧ថ្ងៃ ជាប់រហូត ដោយមិនបាច់បារម្ភ)
+
+---
+
+### ជម្រើសទី ៣: ដំណើរការជាមួយ Docker លើ VPS
+```bash
+docker compose up -d
+```
+

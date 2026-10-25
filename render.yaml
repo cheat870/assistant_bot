@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: telegram-assistant-bot
+    env: python
+    region: singapore
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: BOT_TIMEZONE
+        value: Asia/Phnom_Penh
+      - key: ALERT_HOUR
+        value: "4"
+      - key: ALERT_MINUTE
+        value: "0"
+      - key: MAX_FILE_SIZE_MB
+        value: "50"
