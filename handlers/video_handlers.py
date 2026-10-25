@@ -17,6 +17,31 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
         return
         
     chat = update.effective_chat
+
+    # Quick routing for persistent bottom keyboard buttons
+    if text == "🏠 ផ្ទាំង Menu មេ":
+        from handlers.command_handlers import start_command
+        await start_command(update, context)
+        return
+    elif text == "🗓️ ប្រតិទិនបុណ្យជាតិ":
+        from handlers.command_handlers import calendar_command
+        await calendar_command(update, context)
+        return
+    elif text == "⏳ ថ្ងៃបុណ្យបន្ទាប់":
+        from handlers.command_handlers import upcoming_command
+        await upcoming_command(update, context)
+        return
+    elif text == "📥 របៀបទាញយក":
+        help_msg = (
+            "📥 *របៀបទាញយកវីដេអូ៖*\n\n"
+            "1. ចូលទៅកាន់ TikTok, YouTube, Facebook, Instagram ឬ X/Twitter\n"
+            "2. ចុចពាក្យ **Share** រួចជ្រើសរើស **Copy Link**\n"
+            "3. ផ្ញើ (Paste) Link ចូលក្នុង Bot នេះភ្លាមៗ\n"
+            "4. Bot នឹងទាញយកវីដេអូ និងផ្ញើជូនលោកអ្នកដោយស្វ័យប្រវត្ត!"
+        )
+        await update.message.reply_text(help_msg, parse_mode="Markdown")
+        return
+
     url = extract_video_url(text)
     
     # If not a URL, suggest menu options

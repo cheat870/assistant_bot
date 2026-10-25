@@ -15,7 +15,9 @@ if sys.platform == "win32":
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
         pass
+from telegram import BotCommand
 from telegram.ext import (
+    Application,
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
@@ -36,6 +38,7 @@ from handlers.command_handlers import (
     unsubscribe_command,
     status_command,
     test_alert_command,
+    ask_ai_command,
     button_callback_handler,
 )
 from handlers.video_handlers import handle_video_message
@@ -46,6 +49,22 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+async def post_init(application: Application):
+    """Register official commands in Telegram native menu button."""
+    commands = [
+        BotCommand("start", "🏠 ផ្ទាំង Dashboard មេ (Main Menu)"),
+        BotCommand("upcoming", "⏳ ថ្ងៃបុណ្យបន្ទាប់ (Upcoming Holidays)"),
+        BotCommand("calendar", "📅 ប្រតិទិនបុណ្យជាតិ (Calendar 2025-2027)"),
+        BotCommand("subscribe", "🔔 បើកការដាស់តឿន ៤:០០ ព្រឹក"),
+        BotCommand("unsubscribe", "🔕 បិទការដាស់តឿន ៤:០០ ព្រឹក"),
+        BotCommand("status", "📊 ស្ថានភាពគណនី (My Status)"),
+        BotCommand("ask", "✨ សួរសំណួរ AI (Ask Gemini/GPT)"),
+        BotCommand("test_alert", "🧪 សាកល្បងដំណឹង ៤:០០ ព្រឹក (Test Preview)"),
+        BotCommand("help", "💡 ការណែនាំប្រើប្រាស់ (Help & Guide)"),
+    ]
+    await application.bot.set_my_commands(commands)
+    logger.info("Bot commands successfully registered to Telegram native Menu.")
 
 def main():
     """Main application launcher."""
@@ -69,7 +88,13 @@ def main():
         write_timeout=900.0,
         pool_timeout=60.0,
     )
-    app = ApplicationBuilder().token(BOT_TOKEN).request(request_config).build()
+    app = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .request(request_config)
+        .post_init(post_init)
+        .build()
+    )
     
     # Register Command Handlers
     app.add_handler(CommandHandler("start", start_command))
@@ -81,6 +106,7 @@ def main():
     app.add_handler(CommandHandler("unsubscribe", unsubscribe_command))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("test_alert", test_alert_command))
+    app.add_handler(CommandHandler("ask", ask_ai_command))
     
     # Register Callback Query Handler for Buttons
     app.add_handler(CallbackQueryHandler(button_callback_handler))

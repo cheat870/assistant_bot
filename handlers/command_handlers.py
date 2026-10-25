@@ -1,5 +1,11 @@
 from datetime import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+    KeyboardButton
+)
 from telegram.ext import ContextTypes
 
 from config import BOT_TIMEZONE
@@ -12,57 +18,69 @@ from services.holiday_calendar import (
     get_upcoming_holidays,
     get_current_cambodia_date
 )
+from services.ai_service import query_ai
 
 def get_welcome_text(user_first_name: str) -> str:
-    """Standard welcome message text."""
+    """Standard welcome message text for the dashboard."""
     return (
-        f"👋 *សួស្តី {user_first_name}! សូមស្វាគមន៍មកកាន់ Smart Assistant Bot 🇰🇭*\n\n"
-        "ខ្ញុំជាជំនួយការឆ្លាតវៃដែលអាចជួយលោកអ្នកក្នុងកិច្ចការដូចជា៖\n\n"
-        "📥 *១. ទាញយកវីដេអូគ្រប់ប្រភេទ (All Video Downloader):*\n"
-        "   - គ្រាន់តែ copy link ពី *TikTok, YouTube, Facebook, Instagram, Twitter/X...* រួចផ្ញើចូលទីនេះ នោះខ្ញុំនឹងទាញយកវីដេអូជូនភ្លាមៗ!\n\n"
-        "🗓️ *២. ប្រតិទិនថ្ងៃឈប់សម្រាកបុណ្យជាតិ (Cambodia Holidays):*\n"
-        "   - មើលកាលវិភាគឈប់សម្រាកការងារផ្លូវការ និងចំនួនថ្ងៃដែលនៅសល់។\n\n"
-        "🔔 *៣. ការដាស់តឿនស្វ័យប្រវត្តិនាពេលទៀបភ្លឺ (៤:០០ ព្រឹក):*\n"
-        "   - ផ្ញើសារជូនដំណឹង និងពាក្យជូនពរនៅម៉ោង ៤:០០ ព្រឹក នៅរាល់ថ្ងៃបុណ្យឈប់សម្រាក (បានបើកដំណើរការជាស្វ័យប្រវត្តិ ✅)។\n\n"
-        "សូមជ្រើសរើសមុខងារខាងក្រោម៖"
+        f"🌟 *មជ្ឈមណ្ឌលជំនួយការឆ្លាតវៃ (Smart Assistant Hub)* 🇰🇭\n\n"
+        f"👋 សួស្តី *{user_first_name}*! សូមជ្រើសរើសមុខងារដែលអ្នកត្រូវការប្រើប្រាស់ពី Menu ខាងក្រោម៖\n\n"
+        "📥 *១. Video Downloader:* Copy link ពី TikTok, YouTube, Facebook, IG, X ផ្ញើចូលទីនេះភ្លាមៗ\n"
+        "🗓️ *២. ប្រតិទិនបុណ្យជាតិ:* មើលថ្ងៃឈប់សម្រាកផ្លូវការ និងចំនួនថ្ងៃដែលនៅសល់\n"
+        "⏰ *៣. ដាស់តឿន ៤:០០ ព្រឹក:* ជូនដំណឹងស្វ័យប្រវត្តិនាពេលទៀបភ្លឺរាល់ថ្ងៃឈប់សម្រាក\n"
+        "✨ *៤. ជំនួយការ AI:* ជជែក ឬសួរសំណួរជាមួយ Gemini និង ChatGPT\n\n"
+        "👇 _សូមចុចជ្រើសរើស Menu ខាងក្រោម៖_"
     )
 
 def get_main_menu_keyboard(chat_id: int) -> InlineKeyboardMarkup:
-    """Build interactive inline menu buttons."""
+    """Upgraded full-featured inline dashboard keyboard."""
     subscribed = is_subscribed(chat_id)
-    alert_btn_text = "🔕 បិទការដាស់តឿន 4:00 AM" if subscribed else "🔔 បើកការដាស់តឿន 4:00 AM"
+    alert_btn_text = "🔕 បិទដំណឹង 4:00 AM" if subscribed else "🔔 បើកដំណឹង 4:00 AM"
     alert_callback = "btn_unsubscribe" if subscribed else "btn_subscribe"
     
     keyboard = [
         [
-            InlineKeyboardButton("🗓️ ថ្ងៃឈប់សម្រាកបន្ទាប់", callback_data="btn_upcoming"),
-            InlineKeyboardButton("📅 ប្រតិទិនឆ្នាំ២០២៦", callback_data="btn_calendar_2026"),
+            InlineKeyboardButton("📥 របៀបទាញយកវីដេអូ", callback_data="btn_video_help"),
+            InlineKeyboardButton("🗓️ ប្រតិទិនបុណ្យជាតិ", callback_data="btn_calendar_2026"),
+        ],
+        [
+            InlineKeyboardButton("⏳ ថ្ងៃបុណ្យបន្ទាប់", callback_data="btn_upcoming"),
+            InlineKeyboardButton("📊 ស្ថានភាពគណនី", callback_data="btn_status"),
         ],
         [
             InlineKeyboardButton(alert_btn_text, callback_data=alert_callback),
-            InlineKeyboardButton("🧪 តេស្តដំណឹង (Test 4AM)", callback_data="btn_test_alert"),
+            InlineKeyboardButton("🧪 តេស្តដំណឹង 4AM", callback_data="btn_test_alert"),
         ],
         [
-            InlineKeyboardButton("📥 របៀបទាញយកវីដេអូ", callback_data="btn_video_help"),
+            InlineKeyboardButton("✨ ជំនួយការ AI (Gemini/GPT)", callback_data="btn_ai_menu"),
+            InlineKeyboardButton("💡 ការណែនាំ (Help)", callback_data="btn_help"),
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
+def get_persistent_bottom_keyboard() -> ReplyKeyboardMarkup:
+    """Persistent reply keyboard displayed at the bottom of the chat."""
+    keyboard = [
+        [KeyboardButton("📥 របៀបទាញយក"), KeyboardButton("🗓️ ប្រតិទិនបុណ្យជាតិ")],
+        [KeyboardButton("⏳ ថ្ងៃបុណ្យបន្ទាប់"), KeyboardButton("🏠 ផ្ទាំង Menu មេ")]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
 def get_back_keyboard() -> InlineKeyboardMarkup:
-    """Single Back button keyboard."""
+    """Standard back button returning to main menu."""
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔙 ត្រឡប់ទៅ Menu ដើម", callback_data="btn_back_main")]
     ])
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start command with auto-cleanup of previous menu."""
+    """Handle /start command with auto-cleanup and persistent keyboard."""
     chat = update.effective_chat
     user = update.effective_user
     
-    # Auto-subscribe user on start by default
+    # Auto-subscribe user on start
     add_subscriber(chat.id, user.username, chat.type)
     
-    # Delete previous bot menu message if it exists to prevent chat clutter
+    # Clean previous menu message if exists
     prev_menu_id = context.user_data.get('last_menu_id')
     if prev_menu_id:
         try:
@@ -70,7 +88,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
             
-    # Delete the user's /start message to keep the chat clean
+    # Delete the user's /start command to keep chat clean
     try:
         await update.message.delete()
     except Exception:
@@ -88,14 +106,15 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command."""
     help_text = (
         "💡 *បញ្ជី Command សម្រាប់ប្រើប្រាស់៖*\n\n"
-        "🔹 `/start` - បើកផ្ទាំង Menu មេ (Auto-clean)\n"
+        "🔹 `/start` - បើកផ្ទាំង Dashboard មេ\n"
         "🔹 `/upcoming` - មើលថ្ងៃបុណ្យដែលខិតជិតមកដល់\n"
         "🔹 `/calendar` - មើលប្រតិទិនឈប់សម្រាកប្រចាំឆ្នាំ\n"
         "🔹 `/subscribe` - បើកការដាស់តឿនម៉ោង ៤:០០ ព្រឹក\n"
         "🔹 `/unsubscribe` - បិទការដាស់តឿន\n"
-        "🔹 `/test_alert` - សាកល្បងសារដាស់តឿន ៤:០០ ព្រឹកភ្លាមៗ\n"
-        "🔹 `/status` - ពិនិត្យស្ថានភាពដាស់តឿន\n\n"
-        "📥 *ការទាញយកវីដេអូ:* គ្រាន់តែ copy link (TikTok, YouTube, Facebook, ...) រួច paste ផ្ញើចូល Bot ជាការស្រេច!"
+        "🔹 `/ask <សំណួរ>` - សួរសំណួរទៅកាន់ AI\n"
+        "🔹 `/status` - ពិនិត្យស្ថានភាពគណនី\n"
+        "🔹 `/test_alert` - សាកល្បងសារដាស់តឿន ៤:០០ ព្រឹក\n\n"
+        "📥 *ការទាញយកវីដេអូ:* គ្រាន់តែ copy link (TikTok, YouTube, Facebook, ...) រួច paste ផ្ញើចូលទីនេះភ្លាមៗ!"
     )
     await update.message.reply_text(help_text, reply_markup=get_back_keyboard(), parse_mode="Markdown")
 
@@ -149,13 +168,16 @@ async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /status command."""
     chat_id = update.effective_chat.id
+    user = update.effective_user
     subscribed = is_subscribed(chat_id)
     today_holiday = get_today_holiday()
     today_date = get_current_cambodia_date()
     
     status_text = (
-        "📊 *ស្ថានភាពគណនីរបស់អ្នក (Bot Status):*\n\n"
-        f"📅 កាលបរិច្ឆេទថ្ងៃនេះ: `{today_date}` (Asia/Phnom_Penh)\n"
+        "📊 *ស្ថានភាពគណនីរបស់អ្នក (Account Status)*\n\n"
+        f"👤 ឈ្មោះ: *{user.full_name}*\n"
+        f"🆔 Telegram ID: `{chat_id}`\n"
+        f"📅 កាលបរិច្ឆេទ: `{today_date}` (Asia/Phnom_Penh)\n"
         f"🔔 ការដាស់តឿន ៤:០០ ព្រឹក: {'✅ កំពុងបើក (Active)' if subscribed else '❌ បានបិទ (Inactive)'}\n"
         f"🎉 ថ្ងៃឈប់សម្រាកថ្ងៃនេះ: {today_holiday['name_km'] if today_holiday else 'ពុំមែនជាថ្ងៃឈប់សម្រាកទេ'}\n"
     )
@@ -176,6 +198,20 @@ async def test_alert_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         + format_alert_message(sample_holiday)
     )
     await update.message.reply_text(alert_text, reply_markup=get_back_keyboard(), parse_mode="Markdown")
+
+async def ask_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /ask command for AI consultation."""
+    user_query = " ".join(context.args) if context.args else ""
+    if not user_query:
+        await update.message.reply_text(
+            "💡 *របៀបសួរ AI:*\nសូមវាយ `/ask <សំណួររបស់អ្នក>`\n\nឧទាហរណ៍៖ `/ask តើថ្ងៃចូលឆ្នាំខ្មែរមានប្រវត្តិយ៉ាងណា?`",
+            parse_mode="Markdown"
+        )
+        return
+        
+    await update.message.chat.send_action("typing")
+    response_text = await query_ai(user_query)
+    await update.message.reply_text(response_text, parse_mode="Markdown")
 
 async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle inline button clicks with seamless in-place message editing."""
@@ -214,6 +250,25 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 parse_mode="Markdown"
             )
             
+        elif data == "btn_status":
+            await query.answer()
+            subscribed = is_subscribed(chat_id)
+            today_holiday = get_today_holiday()
+            today_date = get_current_cambodia_date()
+            status_text = (
+                "📊 *ស្ថានភាពគណនីរបស់អ្នក (Account Status)*\n\n"
+                f"👤 ឈ្មោះ: *{user.full_name}*\n"
+                f"🆔 Telegram ID: `{chat_id}`\n"
+                f"📅 កាលបរិច្ឆេទថ្ងៃនេះ: `{today_date}` (Asia/Phnom_Penh)\n"
+                f"🔔 ការដាស់តឿន ៤:០០ ព្រឹក: {'✅ កំពុងបើក (Active)' if subscribed else '❌ បានបិទ (Inactive)'}\n"
+                f"🎉 ថ្ងៃឈប់សម្រាកថ្ងៃនេះ: {today_holiday['name_km'] if today_holiday else 'ពុំមែនជាថ្ងៃឈប់សម្រាកទេ'}\n"
+            )
+            await query.edit_message_text(
+                status_text,
+                reply_markup=get_back_keyboard(),
+                parse_mode="Markdown"
+            )
+            
         elif data == "btn_subscribe":
             add_subscriber(chat_id, user.username, query.message.chat.type)
             await query.answer("✅ បានបើកការដាស់តឿន ៤:០០ ព្រឹកជោគជ័យ!", show_alert=True)
@@ -247,7 +302,45 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 "1. ចូលទៅកាន់ TikTok, YouTube, Facebook, Instagram ឬ X/Twitter\n"
                 "2. ចុចពាក្យ **Share** រួចជ្រើសរើស **Copy Link**\n"
                 "3. ផ្ញើ (Paste) Link ចូលក្នុង Bot នេះភ្លាមៗ\n"
-                "4. Bot នឹងទាញយកវីដេអូ និងផ្ញើចូល Telegram ជូនលោកអ្នកដោយស្វ័យប្រវត្ត!"
+                "4. Bot នឹងទាញយកវីដេអូ និងផ្ញើជូនលោកអ្នកដោយស្វ័យប្រវត្ត!"
+            )
+            await query.edit_message_text(
+                help_msg,
+                reply_markup=get_back_keyboard(),
+                parse_mode="Markdown"
+            )
+            
+        elif data == "btn_ai_menu":
+            await query.answer()
+            ai_msg = (
+                "✨ *ជំនួយការឆ្លាតវៃ AI (Gemini & ChatGPT)* 🤖\n\n"
+                "លោកអ្នកអាចសួរនាំសំណួរ វិភាគទិន្នន័យ បកប្រែភាសា និងសរសេរអត្ថបទបានយ៉ាងរហ័ស!\n\n"
+                "💡 *របៀបប្រើប្រាស់៖*\n"
+                "• វាយ `/ask <សំណួររបស់អ្នក>` ដើម្បីសួរ AI ផ្ទាល់\n"
+                "• ឧទាហរណ៍៖ `/ask សង្ខេបប្រវត្តិបុណ្យភ្ជុំបិណ្ឌ`\n\n"
+                "_(គាំទ្រម៉ូដែល Google Gemini 2.5 Flash និង OpenAI GPT-4o)_"
+            )
+            await query.edit_message_text(
+                ai_msg,
+                reply_markup=get_back_keyboard(),
+                parse_mode="Markdown"
+            )
+            
+        elif data == "btn_help":
+            await query.answer()
+            help_msg = (
+                "💡 *មជ្ឈមណ្ឌលជំនួយ និងការណែនាំ (Help Hub)*\n\n"
+                "📥 *១. ការទាញយកវីដេអូ (Video Downloader):*\n"
+                "• គាំទ្រ: TikTok (No Watermark), YouTube Shorts/Videos, Facebook Reels, Instagram, X/Twitter\n\n"
+                "🗓️ *២. ប្រតិទិនបុណ្យជាតិ (Cambodia Holidays):*\n"
+                "• រួមបញ្ចូលថ្ងៃឈប់សម្រាកផ្លូវការទាំងអស់នៅកម្ពុជា\n"
+                "• ជូនដំណឹងស្វ័យប្រវត្តិនាពេលទៀបភ្លឺ ម៉ោង ៤:០០ ព្រឹក\n\n"
+                "✨ *៣. បញ្ជា Command រហ័ស:*\n"
+                "• `/start` - បើកផ្ទាំង Dashboard មេ\n"
+                "• `/upcoming` - ថ្ងៃបុណ្យបន្ទាប់\n"
+                "• `/calendar` - ប្រតិទិនប្រចាំឆ្នាំ\n"
+                "• `/ask` - សួរសំណួរទៅ AI\n"
+                "• `/status` - ពិនិត្យស្ថានភាពគណនី"
             )
             await query.edit_message_text(
                 help_msg,
@@ -264,7 +357,6 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 parse_mode="Markdown"
             )
     except Exception as e:
-        # Avoid crash if user taps rapidly or message is unchanged
         try:
             await query.answer()
         except Exception:

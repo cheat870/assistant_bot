@@ -12,6 +12,10 @@ load_dotenv(dotenv_path=BASE_DIR / ".env")
 # Telegram Bot Token
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
+# AI Keys (Optional for AI Discussion)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+
 # Timezone (Cambodia)
 TIMEZONE_STR = os.getenv("BOT_TIMEZONE", "Asia/Phnom_Penh")
 BOT_TIMEZONE = pytz.timezone(TIMEZONE_STR)
