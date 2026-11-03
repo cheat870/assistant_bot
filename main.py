@@ -40,6 +40,10 @@ from handlers.command_handlers import (
     status_command,
     test_alert_command,
     ask_ai_command,
+    weather_command,
+    location_command,
+    test_weather_command,
+    handle_location_message,
     button_callback_handler,
 )
 from handlers.video_handlers import handle_video_message
@@ -55,12 +59,15 @@ async def post_init(application: Application):
     """Register official commands in Telegram native menu button."""
     commands = [
         BotCommand("start", "🏠 ផ្ទាំង Dashboard មេ (Main Menu)"),
+        BotCommand("weather", "🌤️ អាកាសធាតុបច្ចុប្បន្ន (Weather Now)"),
+        BotCommand("location", "📍 កំណត់ទីតាំងអាកាសធាតុ (Set Location)"),
         BotCommand("upcoming", "⏳ ថ្ងៃបុណ្យបន្ទាប់ (Upcoming Holidays)"),
         BotCommand("calendar", "📅 ប្រតិទិនបុណ្យជាតិ (Calendar 2025-2027)"),
         BotCommand("subscribe", "🔔 បើកការដាស់តឿន ៤:០០ ព្រឹក"),
         BotCommand("unsubscribe", "🔕 បិទការដាស់តឿន ៤:០០ ព្រឹក"),
         BotCommand("status", "📊 ស្ថានភាពគណនី (My Status)"),
         BotCommand("ask", "✨ សួរសំណួរ AI (Ask Gemini/GPT)"),
+        BotCommand("test_weather", "🧪 តេស្តដំណឹងអាកាសធាតុ ៥:០០ ព្រឹក"),
         BotCommand("test_alert", "🧪 សាកល្បងដំណឹង ៤:០០ ព្រឹក (Test Preview)"),
         BotCommand("help", "💡 ការណែនាំប្រើប្រាស់ (Help & Guide)"),
     ]
@@ -102,6 +109,9 @@ def main():
     
     # Register Command Handlers
     app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("weather", weather_command))
+    app.add_handler(CommandHandler("location", location_command))
+    app.add_handler(CommandHandler("test_weather", test_weather_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("upcoming", upcoming_command))
     app.add_handler(CommandHandler("calendar", calendar_command))
@@ -114,6 +124,9 @@ def main():
     
     # Register Callback Query Handler for Buttons
     app.add_handler(CallbackQueryHandler(button_callback_handler))
+
+    # Register Location Handler for GPS Location Sharing
+    app.add_handler(MessageHandler(filters.LOCATION, handle_location_message))
     
     # Register Message Handler for Videos & Links
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_video_message))

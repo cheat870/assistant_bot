@@ -24,6 +24,10 @@ BOT_TIMEZONE = pytz.timezone(TIMEZONE_STR)
 ALERT_HOUR = int(os.getenv("ALERT_HOUR", "4"))
 ALERT_MINUTE = int(os.getenv("ALERT_MINUTE", "0"))
 
+# Daily Weather Alert Scheduled Time (Default: 5:00 AM)
+WEATHER_ALERT_HOUR = int(os.getenv("WEATHER_ALERT_HOUR", "5"))
+WEATHER_ALERT_MINUTE = int(os.getenv("WEATHER_ALERT_MINUTE", "0"))
+
 # File size limits (Telegram bot upload limit is typically 50 MB)
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
 

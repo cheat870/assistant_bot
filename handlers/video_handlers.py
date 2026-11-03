@@ -23,6 +23,10 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
         from handlers.command_handlers import start_command
         await start_command(update, context)
         return
+    elif text == "🌤️ អាកាសធាតុ":
+        from handlers.command_handlers import weather_command
+        await weather_command(update, context)
+        return
     elif text == "🗓️ ប្រតិទិនបុណ្យជាតិ":
         from handlers.command_handlers import calendar_command
         await calendar_command(update, context)

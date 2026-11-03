@@ -1,5 +1,6 @@
 import sys
 import io
+import asyncio
 from pathlib import Path
 
 # Ensure UTF-8 output on Windows console
@@ -16,8 +17,19 @@ from services.holiday_calendar import (
     format_calendar_message,
     format_alert_message,
 )
-from database import init_db, add_subscriber, is_subscribed, remove_subscriber, get_active_subscribers
+from database import (
+    init_db,
+    add_subscriber,
+    is_subscribed,
+    remove_subscriber,
+    get_active_subscribers,
+    set_user_location,
+    get_user_weather_settings,
+    set_weather_alert_active,
+    get_active_weather_subscribers,
+)
 from services.video_downloader import extract_video_url
+from services.weather_service import fetch_weather, format_weather_message, reverse_geocode_async
 
 def test_holiday_calendar():
     print("[1] Testing Holiday Calendar Service...")
@@ -48,6 +60,21 @@ def test_database():
     remove_subscriber(test_chat_id)
     assert is_subscribed(test_chat_id) is False
     assert test_chat_id not in get_active_subscribers()
+
+    # Weather settings tests
+    set_user_location(test_chat_id, 13.3671, 103.8448, "ខេត្តសៀមរាប")
+    settings = get_user_weather_settings(test_chat_id)
+    assert settings["location_name"] == "ខេត្តសៀមរាប"
+    assert settings["latitude"] == 13.3671
+    assert settings["is_active"] is True
+    print("  - Saved location verified: ខេត្តសៀមរាប")
+
+    set_weather_alert_active(test_chat_id, False)
+    assert get_user_weather_settings(test_chat_id)["is_active"] is False
+
+    set_weather_alert_active(test_chat_id, True)
+    active_subs = get_active_weather_subscribers()
+    assert any(s["chat_id"] == test_chat_id for s in active_subs)
     print("  [OK] Database functions verified!")
 
 def test_video_url_extractor():
@@ -68,8 +95,27 @@ def test_video_url_extractor():
         print(f"  - Matched {site_name}: {url[:40]}...")
     print("  [OK] Video URL extractor verified!")
 
+async def test_weather_service_async():
+    print("\n[4] Testing Weather Service & Reverse Geocoding...")
+    w_data = await fetch_weather(11.5564, 104.9282)
+    assert w_data is not None, "Should fetch weather data from Open-Meteo"
+    assert "current" in w_data
+    assert "temperature_2m" in w_data["current"]
+    print(f"  - Current Temp: {w_data['current']['temperature_2m']}°C")
+    
+    msg = format_weather_message(w_data, "រាជធានីភ្នំពេញ", is_daily_alert=True)
+    assert "៥:០០ ព្រឹក" in msg
+    assert "រាជធានីភ្នំពេញ" in msg
+    print("  - Daily 5:00 AM Alert Message formatted successfully!")
+
+    loc_name = await reverse_geocode_async(11.5564, 104.9282)
+    print(f"  - Reverse geocoded: {loc_name}")
+    assert loc_name is not None
+    print("  [OK] Weather Service verified!")
+
 if __name__ == "__main__":
     test_holiday_calendar()
     test_database()
     test_video_url_extractor()
-    print("\n🎉 ALL TESTS PASSED SUCCESSFULLY! ✅")
+    asyncio.run(test_weather_service_async())
+    print("\n🎉 ALL TESTS (HOLIDAY + VIDEO + WEATHER 5AM) PASSED SUCCESSFULLY! ✅")
