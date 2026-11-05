@@ -3,7 +3,7 @@ import re
 import uuid
 import asyncio
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import httpx
 import yt_dlp
 
@@ -44,6 +44,7 @@ class VideoDownloadResult:
         uploader: Optional[str] = None,
         file_size_mb: float = 0.0,
         direct_web_url: Optional[str] = None,
+        is_audio: bool = False,
         error_message: Optional[str] = None
     ):
         self.success = success
@@ -54,9 +55,10 @@ class VideoDownloadResult:
         self.uploader = uploader or "Unknown"
         self.file_size_mb = file_size_mb
         self.direct_web_url = direct_web_url
+        self.is_audio = is_audio
         self.error_message = error_message
 
-def _download_tiktok_api(url: str, download_folder: Path) -> VideoDownloadResult:
+def _download_tiktok_api(url: str, download_folder: Path, audio_only: bool = False) -> VideoDownloadResult:
     """High-speed watermark-free TikTok downloader via dedicated API."""
     try:
         headers = {
@@ -73,25 +75,31 @@ def _download_tiktok_api(url: str, download_folder: Path) -> VideoDownloadResult
                 return VideoDownloadResult(success=False, error_message=f"TikTok Error: {err_msg}")
             
             video_info = data.get('data', {})
-            # Prefer standard play (no watermark) or hdplay
-            play_url = video_info.get('play') or video_info.get('hdplay') or video_info.get('wmplay')
-            if not play_url:
-                return VideoDownloadResult(success=False, error_message="No playable video link found.")
+            
+            if audio_only:
+                media_url = video_info.get('music') or video_info.get('play')
+                ext = "mp3"
+            else:
+                media_url = video_info.get('hdplay') or video_info.get('play') or video_info.get('wmplay')
+                ext = "mp4"
+
+            if not media_url:
+                return VideoDownloadResult(success=False, error_message="No playable media link found.")
                 
             video_id = video_info.get('id')
-            direct_web_url = f"https://www.tikwm.com/video/media/play/{video_id}.mp4" if video_id else play_url
+            direct_web_url = f"https://www.tikwm.com/video/media/play/{video_id}.mp4" if video_id else media_url
 
-            title = video_info.get('title') or "TikTok Video"
+            title = video_info.get('title') or "TikTok Media"
             author = video_info.get('author', {}).get('nickname') or "TikTok Creator"
             duration = video_info.get('duration')
-            thumbnail = video_info.get('cover')
+            thumbnail = video_info.get('origin_cover') or video_info.get('cover')
             
             unique_id = str(uuid.uuid4())[:8]
-            target_path = download_folder / f"tiktok_{unique_id}.mp4"
+            target_path = download_folder / f"tiktok_{unique_id}.{ext}"
             
-            with client.stream('GET', play_url, headers=headers, follow_redirects=True) as stream_resp:
+            with client.stream('GET', media_url, headers=headers, follow_redirects=True) as stream_resp:
                 if stream_resp.status_code != 200:
-                    return VideoDownloadResult(success=False, error_message=f"Failed to stream video (HTTP {stream_resp.status_code})")
+                    return VideoDownloadResult(success=False, error_message=f"Failed to stream media (HTTP {stream_resp.status_code})")
                 
                 downloaded_bytes = 0
                 max_bytes = MAX_FILE_SIZE_MB * 1024 * 1024
@@ -103,7 +111,7 @@ def _download_tiktok_api(url: str, download_folder: Path) -> VideoDownloadResult
                             target_path.unlink(missing_ok=True)
                             return VideoDownloadResult(
                                 success=False,
-                                error_message=f"ទំហំវីដេអូធំជាង {MAX_FILE_SIZE_MB} MB ដែលលើសពីកម្រិត Telegram Bot អនុញ្ញាត។"
+                                error_message=f"ទំហំឯកសារធំជាង {MAX_FILE_SIZE_MB} MB ដែលលើសពីកម្រិត Telegram Bot អនុញ្ញាត។"
                             )
                         f.write(chunk)
                         
@@ -116,34 +124,48 @@ def _download_tiktok_api(url: str, download_folder: Path) -> VideoDownloadResult
                 thumbnail_url=thumbnail,
                 uploader=author,
                 file_size_mb=file_size_mb,
-                direct_web_url=direct_web_url
+                direct_web_url=direct_web_url,
+                is_audio=audio_only
             )
     except Exception as e:
         return VideoDownloadResult(success=False, error_message=f"កំហុសក្នុងការទាញយក TikTok៖ {str(e)[:120]}")
 
-def _sync_download(url: str, download_folder: Path) -> VideoDownloadResult:
-    """Internal synchronous worker for video downloading."""
+def _sync_download(url: str, download_folder: Path, quality: str = "best", audio_only: bool = False) -> VideoDownloadResult:
+    """Internal synchronous worker for downloading video or audio."""
     # If TikTok, use dedicated fast watermark-free downloader first
     if is_tiktok_url(url):
-        tiktok_res = _download_tiktok_api(url, download_folder)
+        tiktok_res = _download_tiktok_api(url, download_folder, audio_only=audio_only)
         if tiktok_res.success:
             return tiktok_res
 
-    # Use yt-dlp for all other sites (YouTube, Facebook, Instagram, Twitter/X, etc.)
     unique_id = str(uuid.uuid4())[:8]
-    output_template = str(download_folder / f"vid_{unique_id}_%(id)s.%(ext)s")
+    output_template = str(download_folder / f"media_{unique_id}_%(id)s.%(ext)s")
     
+    # Configure quality format
+    if audio_only:
+        fmt = 'bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best'
+    elif quality == "1080p":
+        fmt = 'bestvideo[height<=1080][filesize<48M]+bestaudio/best[height<=1080][filesize<48M]/best[height<=1080]/best'
+    elif quality == "720p":
+        fmt = 'bestvideo[height<=720][filesize<48M]+bestaudio/best[height<=720][filesize<48M]/best[height<=720]/best'
+    elif quality == "480p":
+        fmt = 'bestvideo[height<=480][filesize<48M]+bestaudio/best[height<=480][filesize<48M]/best[height<=480]/best'
+    else:
+        fmt = 'best[filesize<48M]/bestvideo[filesize<40M]+bestaudio/best[ext=mp4]/best'
+
     ydl_opts: Dict[str, Any] = {
-        'format': 'best[filesize<48M]/bestvideo[filesize<40M]+bestaudio/best[ext=mp4]/best',
+        'format': fmt,
         'outtmpl': output_template,
         'noplaylist': True,
         'quiet': True,
         'no_warnings': True,
-        'merge_output_format': 'mp4',
         'socket_timeout': 30,
         'max_filesize': MAX_FILE_SIZE_MB * 1024 * 1024,
     }
     
+    if not audio_only:
+        ydl_opts['merge_output_format'] = 'mp4'
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
@@ -153,7 +175,7 @@ def _sync_download(url: str, download_folder: Path) -> VideoDownloadResult:
             expected_filename = ydl.prepare_filename(info)
             actual_file = None
             
-            base_prefix = f"vid_{unique_id}_"
+            base_prefix = f"media_{unique_id}_"
             for f in download_folder.glob(f"{base_prefix}*"):
                 if f.is_file():
                     actual_file = f
@@ -164,7 +186,7 @@ def _sync_download(url: str, download_folder: Path) -> VideoDownloadResult:
                     actual_file = Path(expected_filename)
             
             if not actual_file or not actual_file.exists():
-                return VideoDownloadResult(success=False, error_message="ឯកសារវីដេអូត្រូវបានទាញយកតែរកមិនឃើញ។")
+                return VideoDownloadResult(success=False, error_message="ឯកសារត្រូវបានទាញយកតែរកមិនឃើញ។")
                 
             file_bytes = actual_file.stat().st_size
             file_size_mb = round(file_bytes / (1024 * 1024), 2)
@@ -177,10 +199,10 @@ def _sync_download(url: str, download_folder: Path) -> VideoDownloadResult:
                 return VideoDownloadResult(
                     success=False,
                     file_size_mb=file_size_mb,
-                    error_message=f"ទំហំវីដេអូ ({file_size_mb} MB) ធំជាងកម្រិត Telegram Bot អនុញ្ញាត ({MAX_FILE_SIZE_MB} MB)។"
+                    error_message=f"ទំហំឯកសារ ({file_size_mb} MB) ធំជាងកម្រិត Telegram Bot អនុញ្ញាត ({MAX_FILE_SIZE_MB} MB)។"
                 )
                 
-            title = info.get('title') or "Video"
+            title = info.get('title') or ("Audio" if audio_only else "Video")
             duration = info.get('duration')
             thumbnail = info.get('thumbnail')
             uploader = info.get('uploader') or info.get('channel') or "Unknown"
@@ -192,19 +214,19 @@ def _sync_download(url: str, download_folder: Path) -> VideoDownloadResult:
                 duration=duration,
                 thumbnail_url=thumbnail,
                 uploader=uploader,
-                file_size_mb=file_size_mb
+                file_size_mb=file_size_mb,
+                is_audio=audio_only
             )
             
     except yt_dlp.utils.DownloadError as e:
         err_str = str(e)
-        # If it was a TikTok link and yt-dlp failed, try TikTok API fallback as secondary attempt
         if is_tiktok_url(url):
-            fallback_res = _download_tiktok_api(url, download_folder)
+            fallback_res = _download_tiktok_api(url, download_folder, audio_only=audio_only)
             if fallback_res.success:
                 return fallback_res
                 
         if "File is larger than max-filesize" in err_str:
-            msg = f"វីដេអូនេះមានទំហំធំជាង {MAX_FILE_SIZE_MB} MB ដែលលើសពីកម្រិត Telegram Bot អាចផ្ញើបាន។"
+            msg = f"ឯកសារនេះមានទំហំធំជាង {MAX_FILE_SIZE_MB} MB ដែលលើសពីកម្រិត Telegram Bot អាចផ្ញើបាន។"
         elif "Private video" in err_str or "login" in err_str.lower():
             msg = "វីដេអូនេះជា Private ឬទាមទារ Login ចូលគណនី។"
         else:
@@ -213,9 +235,64 @@ def _sync_download(url: str, download_folder: Path) -> VideoDownloadResult:
     except Exception as e:
         return VideoDownloadResult(success=False, error_message=f"កំហុសបច្ចេកទេស៖ {str(e)[:120]}")
 
-async def download_video_async(url: str) -> VideoDownloadResult:
-    """Asynchronously download video using thread pool."""
-    return await asyncio.to_thread(_sync_download, url, DOWNLOAD_DIR)
+async def download_video_async(url: str, quality: str = "best") -> VideoDownloadResult:
+    """Asynchronously download video with chosen quality."""
+    return await asyncio.to_thread(_sync_download, url, DOWNLOAD_DIR, quality, False)
+
+async def download_audio_async(url: str) -> VideoDownloadResult:
+    """Asynchronously extract and download audio/mp3."""
+    return await asyncio.to_thread(_sync_download, url, DOWNLOAD_DIR, "best", True)
+
+def _sync_download_thumbnail(url: str, download_folder: Path) -> Optional[str]:
+    """Download highest resolution thumbnail / cover image."""
+    try:
+        # Check TikTok first
+        if is_tiktok_url(url):
+            with httpx.Client(timeout=15) as client:
+                resp = client.post('https://www.tikwm.com/api/', data={'url': url})
+                if resp.status_code == 200:
+                    data = resp.json().get('data', {})
+                    cover_url = data.get('origin_cover') or data.get('cover')
+                    if cover_url:
+                        img_resp = client.get(cover_url, follow_redirects=True)
+                        if img_resp.status_code == 200:
+                            path = download_folder / f"thumb_{uuid.uuid4().hex[:8]}.jpg"
+                            path.write_bytes(img_resp.content)
+                            return str(path)
+
+        # yt-dlp thumbnail extraction
+        ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True}
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if not info:
+                return None
+                
+            thumbnails = info.get('thumbnails', [])
+            best_thumb_url = None
+            if thumbnails:
+                # Pick thumbnail with highest resolution / preference
+                valid_thumbs = [t for t in thumbnails if t.get('url')]
+                if valid_thumbs:
+                    best_thumb = max(valid_thumbs, key=lambda t: (t.get('height') or 0, t.get('preference') or 0))
+                    best_thumb_url = best_thumb.get('url')
+                    
+            if not best_thumb_url:
+                best_thumb_url = info.get('thumbnail')
+                
+            if best_thumb_url:
+                with httpx.Client(timeout=15) as client:
+                    img_resp = client.get(best_thumb_url, follow_redirects=True)
+                    if img_resp.status_code == 200:
+                        path = download_folder / f"thumb_{uuid.uuid4().hex[:8]}.jpg"
+                        path.write_bytes(img_resp.content)
+                        return str(path)
+    except Exception:
+        pass
+    return None
+
+async def download_thumbnail_hd(url: str) -> Optional[str]:
+    """Asynchronously download high definition thumbnail/cover image."""
+    return await asyncio.to_thread(_sync_download_thumbnail, url, DOWNLOAD_DIR)
 
 def cleanup_file(file_path: Optional[str]):
     """Safely delete downloaded temporary file."""

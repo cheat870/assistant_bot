@@ -5,3 +5,7 @@ pytz>=2026.1
 python-dotenv>=1.0.0
 httpx>=0.28.0
 curl-cffi>=0.16.0
+pillow>=10.0.0
+qrcode>=8.0
+opencv-python-headless>=4.8.0
+google-genai>=2.0.0

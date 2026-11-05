@@ -41,6 +41,39 @@ def init_db():
             downloaded_at TEXT
         )
     """)
+
+    # Table for personal custom reminders
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER,
+            remind_at TEXT,
+            remind_time_str TEXT,
+            message TEXT,
+            is_triggered INTEGER DEFAULT 0,
+            created_at TEXT
+        )
+    """)
+
+    # Table for continuous AI chat mode
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS ai_sessions (
+            chat_id INTEGER PRIMARY KEY,
+            is_continuous INTEGER DEFAULT 0,
+            updated_at TEXT
+        )
+    """)
+
+    # Table for AI conversation context memory
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS ai_chat_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER,
+            role TEXT,
+            content TEXT,
+            created_at TEXT
+        )
+    """)
     
     conn.commit()
     conn.close()
@@ -194,3 +227,142 @@ def get_active_weather_subscribers() -> List[Dict[str, Any]]:
             "location_name": r[3] or "រាជធានីភ្នំពេញ"
         })
     return results
+
+# -------------------------------------------------------------
+# Personal Reminders Operations
+# -------------------------------------------------------------
+def add_reminder(chat_id: int, remind_at: str, remind_time_str: str, message: str) -> int:
+    """Create a new custom reminder."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO reminders (chat_id, remind_at, remind_time_str, message, is_triggered, created_at)
+        VALUES (?, ?, ?, ?, 0, ?)
+    """, (chat_id, remind_at, remind_time_str, message, datetime.utcnow().isoformat()))
+    rem_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return rem_id
+
+def get_due_reminders(now_iso: str) -> List[Dict[str, Any]]:
+    """Get all reminders whose time has passed and not yet triggered."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, chat_id, remind_time_str, message
+        FROM reminders
+        WHERE remind_at <= ? AND is_triggered = 0
+    """, (now_iso,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"id": r[0], "chat_id": r[1], "time_str": r[2], "message": r[3]} for r in rows]
+
+def mark_reminder_done(reminder_id: int):
+    """Mark a reminder as triggered."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE reminders SET is_triggered = 1 WHERE id = ?", (reminder_id,))
+    conn.commit()
+    conn.close()
+
+def get_user_reminders(chat_id: int) -> List[Dict[str, Any]]:
+    """Get list of active reminders for a user."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, remind_time_str, message
+        FROM reminders
+        WHERE chat_id = ? AND is_triggered = 0
+        ORDER BY remind_at ASC
+    """, (chat_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"id": r[0], "time_str": r[1], "message": r[2]} for r in rows]
+
+def delete_reminder(reminder_id: int, chat_id: int) -> bool:
+    """Delete a reminder by ID."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM reminders WHERE id = ? AND chat_id = ?", (reminder_id, chat_id))
+    affected = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return affected
+
+# -------------------------------------------------------------
+# Continuous AI Mode & Conversation Memory Operations
+# -------------------------------------------------------------
+def is_ai_mode(chat_id: int) -> bool:
+    """Check if a chat has continuous AI chat mode enabled."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT is_continuous FROM ai_sessions WHERE chat_id = ?", (chat_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return bool(row and row[0] == 1)
+
+def set_ai_mode(chat_id: int, enabled: bool) -> bool:
+    """Toggle continuous AI chat mode for a chat."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    now_str = datetime.utcnow().isoformat()
+    val = 1 if enabled else 0
+    cursor.execute("""
+        INSERT INTO ai_sessions (chat_id, is_continuous, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(chat_id) DO UPDATE SET is_continuous = excluded.is_continuous, updated_at = excluded.updated_at
+    """, (chat_id, val, now_str))
+    conn.commit()
+    conn.close()
+    return True
+
+def save_chat_message(chat_id: int, role: str, content: str):
+    """Save an AI message to conversation memory."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO ai_chat_history (chat_id, role, content, created_at)
+        VALUES (?, ?, ?, ?)
+    """, (chat_id, role, content, datetime.utcnow().isoformat()))
+    conn.commit()
+    conn.close()
+
+def get_chat_history(chat_id: int, limit: int = 8) -> List[Dict[str, str]]:
+    """Retrieve recent chat history for context memory."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT role, content FROM (
+            SELECT id, role, content FROM ai_chat_history
+            WHERE chat_id = ?
+            ORDER BY id DESC LIMIT ?
+        ) ORDER BY id ASC
+    """, (chat_id, limit))
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"role": r[0], "content": r[1]} for r in rows]
+
+def clear_chat_history(chat_id: int):
+    """Clear AI conversation memory for a chat."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM ai_chat_history WHERE chat_id = ?", (chat_id,))
+    conn.commit()
+    conn.close()
+
+def get_all_registered_chats() -> List[int]:
+    """Get all unique chat IDs across subscribers, reminders and settings for admin broadcast."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT DISTINCT chat_id FROM (
+            SELECT chat_id FROM alert_subscribers
+            UNION
+            SELECT chat_id FROM weather_settings
+            UNION
+            SELECT chat_id FROM ai_sessions
+        )
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [r[0] for r in rows]

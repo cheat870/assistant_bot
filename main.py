@@ -43,6 +43,15 @@ from handlers.command_handlers import (
     weather_command,
     location_command,
     test_weather_command,
+    finance_command,
+    convert_command,
+    remind_command,
+    reminders_command,
+    aimode_command,
+    qr_command,
+    broadcast_command,
+    handle_voice_message,
+    handle_photo_message,
     handle_location_message,
     button_callback_handler,
 )
@@ -59,16 +68,17 @@ async def post_init(application: Application):
     """Register official commands in Telegram native menu button."""
     commands = [
         BotCommand("start", "🏠 ផ្ទាំង Dashboard មេ (Main Menu)"),
+        BotCommand("finance", "💰 សេដ្ឋកិច្ច / មាស / សាំង (Finance & Rates)"),
+        BotCommand("remind", "⏰ កំណត់សារដាស់តឿន (Set Reminder)"),
+        BotCommand("reminders", "📋 បញ្ជីសារដាស់តឿន (Active Reminders)"),
+        BotCommand("aimode", "🤖 បើក/បិទ AI Continuous Chat"),
+        BotCommand("ask", "✨ សួរសំណួរ AI (Ask Gemini/GPT)"),
+        BotCommand("qr", "🔲 បង្កើត QR Code (Generate QR)"),
         BotCommand("weather", "🌤️ អាកាសធាតុបច្ចុប្បន្ន (Weather Now)"),
         BotCommand("location", "📍 កំណត់ទីតាំងអាកាសធាតុ (Set Location)"),
         BotCommand("upcoming", "⏳ ថ្ងៃបុណ្យបន្ទាប់ (Upcoming Holidays)"),
-        BotCommand("calendar", "📅 ប្រតិទិនបុណ្យជាតិ (Calendar 2025-2027)"),
-        BotCommand("subscribe", "🔔 បើកការដាស់តឿន ៤:០០ ព្រឹក"),
-        BotCommand("unsubscribe", "🔕 បិទការដាស់តឿន ៤:០០ ព្រឹក"),
+        BotCommand("calendar", "📅 ប្រតិទិនបុណ្យជាតិ (Calendar)"),
         BotCommand("status", "📊 ស្ថានភាពគណនី (My Status)"),
-        BotCommand("ask", "✨ សួរសំណួរ AI (Ask Gemini/GPT)"),
-        BotCommand("test_weather", "🧪 តេស្តដំណឹងអាកាសធាតុ ៥:០០ ព្រឹក"),
-        BotCommand("test_alert", "🧪 សាកល្បងដំណឹង ៤:០០ ព្រឹក (Test Preview)"),
         BotCommand("help", "💡 ការណែនាំប្រើប្រាស់ (Help & Guide)"),
     ]
     await application.bot.set_my_commands(commands)
@@ -77,7 +87,7 @@ async def post_init(application: Application):
 def main():
     """Main application launcher."""
     print("=" * 60)
-    print("🚀 Starting Telegram Assistant Bot (Video Downloader & Holiday Alert)")
+    print("🚀 Starting Telegram Assistant Bot (Video Downloader & Smart Hub)")
     print("=" * 60)
     
     if not BOT_TOKEN or BOT_TOKEN == "your_telegram_bot_token_here":
@@ -107,7 +117,7 @@ def main():
         .build()
     )
     
-    # Register Command Handlers
+    # Register Core Command Handlers
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("weather", weather_command))
     app.add_handler(CommandHandler("location", location_command))
@@ -122,16 +132,31 @@ def main():
     app.add_handler(CommandHandler("test_alert", test_alert_command))
     app.add_handler(CommandHandler("ask", ask_ai_command))
     
+    # Register New V2 Upgraded Command Handlers
+    app.add_handler(CommandHandler("finance", finance_command))
+    app.add_handler(CommandHandler("convert", convert_command))
+    app.add_handler(CommandHandler("remind", remind_command))
+    app.add_handler(CommandHandler("reminders", reminders_command))
+    app.add_handler(CommandHandler("aimode", aimode_command))
+    app.add_handler(CommandHandler("qr", qr_command))
+    app.add_handler(CommandHandler("broadcast", broadcast_command))
+    
     # Register Callback Query Handler for Buttons
     app.add_handler(CallbackQueryHandler(button_callback_handler))
 
     # Register Location Handler for GPS Location Sharing
     app.add_handler(MessageHandler(filters.LOCATION, handle_location_message))
     
-    # Register Message Handler for Videos & Links
+    # Register Voice & Audio Handler (Gemini Voice AI)
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice_message))
+    
+    # Register Photo Handler (QR/KHQR & Gemini Vision OCR)
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
+
+    # Register Message Handler for Videos, Links & Continuous AI Chat
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_video_message))
     
-    # Register Daily 4:00 AM Scheduler
+    # Register Daily Scheduler (4AM Holidays, 5AM Weather, Reminders)
     setup_scheduler(app)
     
     print("\n✅ Bot ដំណើរការរួចរាល់ហើយ! (Bot is running via polling...)")

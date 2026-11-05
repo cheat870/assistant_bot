@@ -12,6 +12,9 @@ load_dotenv(dotenv_path=BASE_DIR / ".env")
 # Telegram Bot Token
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
+# Admin ID (for /broadcast command)
+ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "1667275809"))
+
 # AI Keys (Optional for AI Discussion)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")

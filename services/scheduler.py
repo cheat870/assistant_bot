@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import time
+from datetime import time, datetime
 from typing import Optional
 from telegram.ext import Application
 import pytz
@@ -12,7 +12,12 @@ from config import (
     WEATHER_ALERT_HOUR,
     WEATHER_ALERT_MINUTE,
 )
-from database import get_active_subscribers, get_active_weather_subscribers
+from database import (
+    get_active_subscribers,
+    get_active_weather_subscribers,
+    get_due_reminders,
+    mark_reminder_done,
+)
 from services.holiday_calendar import get_today_holiday, format_alert_message
 from services.weather_service import fetch_weather, format_weather_message
 
@@ -59,7 +64,6 @@ async def send_daily_weather_to_subscribers(app: Application):
         return 0
         
     sent_count = 0
-    # Cache weather data for identical lat/lon to save requests
     weather_cache = {}
     
     for sub in subscribers:
@@ -88,7 +92,7 @@ async def send_daily_weather_to_subscribers(app: Application):
                 parse_mode="Markdown"
             )
             sent_count += 1
-            await asyncio.sleep(0.05)  # Telegram API rate limit protection
+            await asyncio.sleep(0.05)
         except Exception as e:
             logger.warning(f"Failed to send 5AM weather alert to chat_id {chat_id}: {e}")
             
@@ -105,8 +109,30 @@ async def daily_weather_job(context):
     logger.info("Executing scheduled 5:00 AM Cambodia daily weather alert...")
     await send_daily_weather_to_subscribers(context.application)
 
+async def check_reminders_job(context):
+    """JobQueue callback executed every 60 seconds to fire due reminders."""
+    now_iso = datetime.utcnow().isoformat()
+    due_reminders = get_due_reminders(now_iso)
+    for rem in due_reminders:
+        try:
+            msg = (
+                f"⏰ *[សារដាស់តឿនរបស់អ្នក (Reminder)]* 🔔\n\n"
+                f"🕒 *ម៉ោង៖* `{rem['time_str']}`\n"
+                f"📝 *កិច្ចការ៖* {rem['message']}\n\n"
+                f"✨ កុំភ្លេចរៀបចំឱ្យបានរួចរាល់ណា៎! 🙌"
+            )
+            await context.application.bot.send_message(
+                chat_id=rem["chat_id"],
+                text=msg,
+                parse_mode="Markdown"
+            )
+            mark_reminder_done(rem["id"])
+            logger.info(f"Triggered reminder {rem['id']} for chat_id {rem['chat_id']}")
+        except Exception as e:
+            logger.warning(f"Failed to deliver reminder {rem['id']}: {e}")
+
 def setup_scheduler(app: Application):
-    """Set up the daily 4:00 AM holiday and 5:00 AM weather alerts using telegram JobQueue."""
+    """Set up the daily 4:00 AM holiday, 5:00 AM weather alerts, and reminders checker."""
     job_queue = app.job_queue
     if not job_queue:
         logger.warning("JobQueue is not enabled in Application.")
@@ -129,3 +155,12 @@ def setup_scheduler(app: Application):
         name="daily_cambodia_weather_alert"
     )
     logger.info(f"Registered daily 5:00 AM weather alert at {weather_alert_time} ({BOT_TIMEZONE}).")
+
+    # 3. Custom Reminders: Check every 60 seconds
+    job_queue.run_repeating(
+        check_reminders_job,
+        interval=60,
+        first=10,
+        name="custom_reminders_checker"
+    )
+    logger.info("Registered custom reminders checker job (every 60s).")
