@@ -77,6 +77,11 @@ from services.pdf_service import analyze_and_summarize_pdf, answer_pdf_question
 from services.image_enhancer_service import enhance_image
 from services.watermark_service import apply_watermark
 from services.welcome_banner_service import generate_welcome_banner
+from services.image_location_service import (
+    extract_gps_from_image_bytes,
+    format_photo_gps_message,
+    identify_location_via_vision,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1203,6 +1208,40 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
         tg_file = await context.bot.get_file(photo.file_id)
         img_bytes = bytes(await tg_file.download_as_bytearray())
         
+        # 1. Check for EXIF GPS metadata in photo
+        gps_coords = extract_gps_from_image_bytes(img_bytes)
+        caption_lower = caption.lower()
+        is_loc_request = any(k in caption_lower for k in ["/loc", "/location", "ទីតាំង", "កន្លែង", "ផែនទី", "gps", "where", "location"])
+
+        if gps_coords:
+            lat, lon = gps_coords
+            status = await update.message.reply_text("📍 *បានរកឃើញ GPS ក្នុងរូបភាព! កំពុងទាញយកព័ត៌មានទីតាំង...* 🛰️", parse_mode="Markdown")
+            loc_info = await get_detailed_cambodia_location(lat, lon)
+            w_data = await fetch_weather(lat, lon)
+            temp_str = None
+            if w_data and "current" in w_data:
+                curr = w_data["current"]
+                temp_str = f"*{curr.get('temperature_2m')}°C* (ខ្យល់: {curr.get('wind_speed_10m')} km/h)"
+            loc_msg = format_photo_gps_message(loc_info, temp_str)
+            maps_url = f"https://www.google.com/maps?q={lat},{lon}"
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🗺️ បើកមើលលើ Google Maps", url=maps_url)],
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await safe_edit_text(status, loc_msg, reply_markup=kb)
+            try:
+                await update.message.reply_location(latitude=lat, longitude=lon)
+            except Exception as e_loc:
+                logger.warning(f"Could not send native location: {e_loc}")
+            return
+
+        if is_loc_request:
+            # User specifically requested location identification
+            status = await update.message.reply_text("🔍 *កំពុងពិនិត្យមើលស្លាកសញ្ញា សំណង់ និងទីតាំងក្នុងរូបភាព (AI Geolocation)...* 🛰️", parse_mode="Markdown")
+            vision_loc = await identify_location_via_vision(img_bytes, caption=caption)
+            await safe_edit_text(status, vision_loc)
+            return
+
         # Check if caption requests image enhancement (HD Upscaler)
         caption_lower = caption.lower()
         if "/enhance" in caption_lower or "/upscale" in caption_lower or "ច្បាស់" in caption_lower:
@@ -1284,11 +1323,14 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
         reply_text = await process_vision_ai(img_bytes, mime_type="image/jpeg", caption=caption)
         photo_action_kb = InlineKeyboardMarkup([
             [
+                InlineKeyboardButton("📍 ស្វែងរកទីតាំង (GPS)", callback_data="btn_photo_loc_help"),
                 InlineKeyboardButton("🔍 ធ្វើឱ្យច្បាស់ HD", callback_data="btn_photo_enhance_help"),
-                InlineKeyboardButton("💧 ដាក់ Watermark", callback_data="btn_photo_watermark_help"),
             ],
             [
+                InlineKeyboardButton("💧 ដាក់ Watermark", callback_data="btn_photo_watermark_help"),
                 InlineKeyboardButton("✂️ កាត់ Background", callback_data="btn_photo_rembg_help"),
+            ],
+            [
                 InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main"),
             ]
         ])
@@ -1297,6 +1339,62 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception as e:
         logger.error(f"Error handling photo: {e}")
         await safe_reply_text(update.message, f"❌ កំហុសក្នុងការដំណើរការរូបភាព៖ {str(e)[:100]}")
+
+async def handle_document_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle uncompressed photos sent as File/Document to preserve full camera EXIF GPS tags."""
+    doc = update.message.document
+    if not doc:
+        return
+
+    mime = (doc.mime_type or "").lower()
+    fname = (doc.file_name or "").lower()
+    is_img = mime.startswith("image/") or any(fname.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".heic", ".webp"])
+    if not is_img:
+        return
+
+    if doc.file_size and doc.file_size > 25 * 1024 * 1024:
+        return
+
+    await update.message.chat.send_action("typing")
+    try:
+        tg_file = await context.bot.get_file(doc.file_id)
+        img_bytes = bytes(await tg_file.download_as_bytearray())
+        caption = update.message.caption or ""
+
+        # Check for EXIF GPS
+        gps_coords = extract_gps_from_image_bytes(img_bytes)
+        if gps_coords:
+            lat, lon = gps_coords
+            status = await update.message.reply_text("📍 *បានរកឃើញ GPS ក្នុង File រូបភាព! កំពុងទាញយកទីតាំង...* 🛰️", parse_mode="Markdown")
+            loc_info = await get_detailed_cambodia_location(lat, lon)
+            w_data = await fetch_weather(lat, lon)
+            temp_str = None
+            if w_data and "current" in w_data:
+                curr = w_data["current"]
+                temp_str = f"*{curr.get('temperature_2m')}°C* (ខ្យល់: {curr.get('wind_speed_10m')} km/h)"
+            loc_msg = format_photo_gps_message(loc_info, temp_str)
+            maps_url = f"https://www.google.com/maps?q={lat},{lon}"
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🗺️ បើកមើលលើ Google Maps", url=maps_url)],
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await safe_edit_text(status, loc_msg, reply_markup=kb)
+            try:
+                await update.message.reply_location(latitude=lat, longitude=lon)
+            except Exception as e_loc:
+                logger.warning(f"Could not send native location: {e_loc}")
+            return
+
+        # If no GPS, but caption requests location
+        caption_lower = caption.lower()
+        if any(k in caption_lower for k in ["/loc", "/location", "ទីតាំង", "កន្លែង", "ផែនទី", "gps", "where", "location"]):
+            status = await update.message.reply_text("🔍 *កំពុងវិភាគទីតាំងក្នុងរូបភាព (AI Geolocation)...* 🛰️", parse_mode="Markdown")
+            vision_loc = await identify_location_via_vision(img_bytes, caption=caption)
+            await safe_edit_text(status, vision_loc)
+            return
+
+    except Exception as e:
+        logger.error(f"Error handling document image: {e}")
 
 # -------------------------------------------------------------
 # Existing Weather, Calendar & Alert Commands
@@ -1880,6 +1978,19 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             )
             await query.edit_message_text(help_msg, reply_markup=get_back_keyboard(), parse_mode="Markdown")
             
+        elif data == "btn_photo_loc_help":
+            await query.answer()
+            msg = (
+                "📍 *របៀបទាញយកទីតាំង GPS ពីរូបភាព (Photo Location Extraction)៖*\n\n"
+                "1. **ទាញយក GPS សុក្រឹត ១០០% ពីទូរស័ព្ទដៃ៖**\n"
+                "   • ចុចផ្ញើរូបភាពដោយជ្រើសរើស **File / Document (Uncompressed)** មកកាន់ Bot\n"
+                "   • Bot នឹងអាន EXIF GPS Metadata ពីកាមេរ៉ា ហើយទាញយកឈ្មោះភូមិ ឃុំ ស្រុក ខេត្ត និងផ្ញើ Pin លើ Google Maps ជូនភ្លាមៗ!\n\n"
+                "2. **ស្វែងរកទីតាំងតាមរូបភាព (AI Geolocation)៖**\n"
+                "   • ផ្ញើរូបភាពធម្មតាដោយដាក់ Caption ថា `ទីតាំង` ឬ `កន្លែងណា` ឬ `/location`\n"
+                "   • AI នឹងពិនិត្យមើលវត្តអារាម សំណង់ប្រវត្តិសាស្ត្រ ស្លាកសញ្ញា ឬផ្លូវ ដើម្បីកំណត់ទីតាំងជូន!"
+            )
+            await query.message.reply_text(msg, parse_mode="Markdown")
+
         elif data == "btn_photo_enhance_help":
             await query.answer()
             msg = (

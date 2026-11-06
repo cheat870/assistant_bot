@@ -70,6 +70,7 @@ from handlers.command_handlers import (
     handle_new_chat_members,
     handle_voice_message,
     handle_photo_message,
+    handle_document_image,
     handle_location_message,
     button_callback_handler,
 )
@@ -207,6 +208,13 @@ def main():
 
     # Register PDF Document Handler (Chat with PDF & Summarizer)
     app.add_handler(MessageHandler(filters.Document.PDF | filters.Document.MimeType("application/pdf"), handle_pdf_document, block=False))
+
+    # Register Uncompressed Document Image Handler (EXIF GPS Extraction)
+    app.add_handler(MessageHandler(
+        filters.Document.IMAGE | filters.Document.MimeType("image/jpeg") | filters.Document.MimeType("image/png") | filters.Document.MimeType("image/webp"),
+        handle_document_image,
+        block=False
+    ))
 
     # Register New Chat Members Handler (Custom Welcome Banner)
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, handle_new_chat_members, block=False))

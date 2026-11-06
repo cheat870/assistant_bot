@@ -280,6 +280,43 @@ def test_welcome_banner_service():
     assert is_welcome_enabled(test_group) is False
     print("  [OK] Welcome Banner & Group Settings verified!")
 
+def test_image_location_service():
+    print("\n[13] Testing Image Location Extraction (EXIF GPS)...")
+    from PIL import Image, ExifTags
+    from services.image_location_service import extract_gps_from_image_bytes, format_photo_gps_message
+    
+    # Create an in-memory JPEG with EXIF GPS (Phnom Penh)
+    img = Image.new("RGB", (100, 100), color="blue")
+    exif = img.getexif()
+    gps_ifd = exif.get_ifd(ExifTags.IFD.GPSInfo)
+    gps_ifd[1] = "N"
+    gps_ifd[2] = (11.0, 33.0, 23.0)
+    gps_ifd[3] = "E"
+    gps_ifd[4] = (104.0, 55.0, 41.0)
+    
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", exif=exif)
+    jpeg_bytes = buf.getvalue()
+    
+    coords = extract_gps_from_image_bytes(jpeg_bytes)
+    assert coords is not None
+    assert abs(coords[0] - 11.556389) < 0.001
+    assert abs(coords[1] - 104.928056) < 0.001
+    print(f"  - Extracted GPS coordinates: {coords[0]}, {coords[1]}")
+    
+    loc_dummy = {
+        "village": "វិមានឯករាជ្យ",
+        "commune": "សង្កាត់បឹងកេងកងទី ១",
+        "district": "ខណ្ឌដូនពេញ",
+        "province": "រាជធានីភ្នំពេញ",
+        "lat": coords[0],
+        "lon": coords[1]
+    }
+    msg = format_photo_gps_message(loc_dummy, "28°C")
+    assert "រាជធានីភ្នំពេញ" in msg
+    assert "Google Maps" in msg
+    print("  [OK] Image Location Extraction Service verified!")
+
 if __name__ == "__main__":
     test_holiday_calendar()
     test_database()
@@ -293,4 +330,5 @@ if __name__ == "__main__":
     test_image_enhancer()
     test_watermark_service()
     test_welcome_banner_service()
-    print("\n🎉 ALL 12 TEST SUITES PASSED SUCCESSFULLY! ✅")
+    test_image_location_service()
+    print("\n🎉 ALL 13 TEST SUITES PASSED SUCCESSFULLY! ✅")
