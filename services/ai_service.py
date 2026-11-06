@@ -16,13 +16,20 @@ SYSTEM_PROMPT = (
 # In-memory cache for the confirmed working model
 _cached_working_model: Optional[str] = None
 
-# Free-tier stable models in priority order (1.5-flash has generous free quota)
+# Free-tier stable models in priority order
 DEFAULT_CANDIDATES = [
     "gemini-1.5-flash",
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
     "gemini-1.5-pro",
 ]
+
+DISALLOWED_SUBSTRINGS = ["live", "realtime", "streaming", "embed", "imagen", "veo", "tts", "aqa"]
+
+def is_valid_generation_model(name: str) -> bool:
+    """Check if model name is valid for standard generate_content (excludes streaming/live/embed)."""
+    name_lower = name.lower()
+    return not any(dis in name_lower for dis in DISALLOWED_SUBSTRINGS)
 
 def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT):
     """Synchronous worker that calls Gemini with automatic dynamic model discovery and fallback."""
@@ -41,22 +48,22 @@ def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT):
             )
         except Exception as e:
             err_msg = str(e).lower()
-            if any(k in err_msg for k in ["404", "not found", "not available", "429", "quota", "resource_exhausted"]):
+            if any(k in err_msg for k in ["404", "not found", "not available", "429", "quota", "resource_exhausted", "400"]):
                 logger.warning(f"Cached model {_cached_working_model} failed, resetting cache...")
                 _cached_working_model = None
             else:
                 raise e
 
-    candidates = list(DEFAULT_CANDIDATES)
+    candidates = [m for m in DEFAULT_CANDIDATES if is_valid_generation_model(m)]
 
-    # Check available models for this specific API key
+    # Discover and append valid models from the user's API key
     try:
         listed = []
         for m in client.models.list():
             name = (m.name or "").replace("models/", "")
-            if "flash" in name.lower() and "embed" not in name.lower():
+            if is_valid_generation_model(name) and "flash" in name.lower():
                 listed.append(name)
-        # Prioritize 1.5-flash if available in listed
+        # Prioritize 1.5-flash if available
         if "gemini-1.5-flash" in listed:
             listed.remove("gemini-1.5-flash")
             listed.insert(0, "gemini-1.5-flash")
@@ -85,7 +92,8 @@ def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT):
             err_msg = str(e).lower()
             is_skippable = any(k in err_msg for k in [
                 "404", "not found", "not available", "not supported",
-                "429", "quota", "resource_exhausted", "exceeded your current quota"
+                "429", "quota", "resource_exhausted", "exceeded your current quota",
+                "400", "invalid_argument", "streaming", "bidirectional", "live-preview", "live"
             ])
             if is_skippable:
                 logger.warning(f"Gemini model {model_name} skipped ({e}), trying next candidate...")
@@ -95,6 +103,20 @@ def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT):
 
     if last_err:
         raise last_err
+
+def format_gemini_error(err: Exception) -> str:
+    """Format Gemini error into a helpful Khmer user message."""
+    err_str = str(err)
+    err_lower = err_str.lower()
+    if any(k in err_lower for k in ["429", "quota", "resource_exhausted", "exceeded your current quota"]):
+        return (
+            "⚠️ *Google Gemini បានកំណត់កម្រិតសំណួរ (Rate Limit 429 / Quota)*\n\n"
+            "👉 *មូលហេតុ៖* API Key នេះត្រូវបានបង្កើតនៅក្នុង Project ដែលអស់ Quota ឬសួរលើសពី ១៥ ដងក្នុង ១ នាទី។\n\n"
+            "💡 *ដំណោះស្រាយងាយៗ៖*\n"
+            "1. **រង់ចាំប្រហែល ១ នាទី** រួចសួរម្តងទៀត (Rate limit នឹង Reset ដោយស្វ័យប្រវត្តិ)។\n"
+            "2. ឬចូលទៅ [aistudio.google.com](https://aistudio.google.com) ➔ ចុច **Get API key** ➔ **Create API key in NEW project** (កុំជ្រើសរើស existing project) ➔ យក Key ថ្មីនោះទៅប្តូរក្នុង Render!"
+        )
+    return f"❌ Gemini Error: {err_str[:160]}"
 
 async def query_ai(prompt: str) -> str:
     """Query Gemini or ChatGPT for a single question."""
@@ -106,15 +128,8 @@ async def query_ai(prompt: str) -> str:
             response = await asyncio.to_thread(_call_gemini_api, client, prompt)
             return f"✨ *Gemini ឆ្លើយតប៖*\n\n{response.text}"
         except Exception as e:
-            err_str = str(e)
-            logger.error(f"Gemini error: {err_str}")
-            if any(k in err_str.lower() for k in ["429", "quota", "resource_exhausted", "exceeded your current quota"]):
-                return (
-                    "⚠️ *Google Gemini Quota ពេញបណ្ដោះអាសន្ន (Rate Limit 429)*\n\n"
-                    "គណនី Free Tier អនុញ្ញាតឱ្យសួរ ១៥ ដងក្នុង ១ នាទី។\n"
-                    "👉 **សូមរង់ចាំប្រហែល ១ នាទី** រួចសាកល្បងសួរម្តងទៀតណា៎! (កម្រិតកំណត់នឹង Reset ដោយស្វ័យប្រវត្តិ)។"
-                )
-            return f"❌ Gemini Error: {err_str[:150]}"
+            logger.error(f"Gemini query error: {e}")
+            return format_gemini_error(e)
             
     if OPENAI_API_KEY and OPENAI_API_KEY != "your_openai_api_key_here":
         try:
@@ -178,14 +193,8 @@ async def query_continuous_ai(chat_id: int, user_prompt: str) -> str:
         return reply_text
         
     except Exception as e:
-        err_str = str(e)
-        logger.error(f"Continuous AI error: {err_str}")
-        if any(k in err_str.lower() for k in ["429", "quota", "resource_exhausted"]):
-            return (
-                "⚠️ *Google Gemini Quota ពេញបណ្ដោះអាសន្ន (Rate Limit 429)*\n\n"
-                "👉 សូមរង់ចាំប្រហែល ១ នាទី រួចផ្ញើសារម្តងទៀតណា៎!"
-            )
-        return f"❌ AI Error: {err_str[:150]}"
+        logger.error(f"Continuous AI error: {e}")
+        return format_gemini_error(e)
 
 async def process_voice_ai(voice_bytes: bytes, mime_type: str = "audio/ogg") -> str:
     """Understand and respond to Telegram voice message using Gemini."""
@@ -212,11 +221,8 @@ async def process_voice_ai(voice_bytes: bytes, mime_type: str = "audio/ogg") -> 
         return f"🎙️ *Gemini Voice AI ឆ្លើយតប៖*\n\n{reply_text}"
         
     except Exception as e:
-        err_str = str(e)
-        logger.error(f"Voice AI error: {err_str}")
-        if any(k in err_str.lower() for k in ["429", "quota", "resource_exhausted"]):
-            return "⚠️ *Google Gemini Quota ពេញបណ្ដោះអាសន្ន* សូមរង់ចាំ ១ នាទី រួចផ្ញើសារសំឡេងម្តងទៀតណា៎!"
-        return f"❌ Voice AI Error: {err_str[:150]}"
+        logger.error(f"Voice AI error: {e}")
+        return format_gemini_error(e)
 
 async def process_vision_ai(image_bytes: bytes, mime_type: str = "image/jpeg", caption: str = "") -> str:
     """Analyze image / OCR / translate / homework solve using Gemini."""
@@ -247,8 +253,5 @@ async def process_vision_ai(image_bytes: bytes, mime_type: str = "image/jpeg", c
         return f"📷 *Gemini Vision AI (OCR & វិភាគរូបភាព)៖*\n\n{reply_text}"
         
     except Exception as e:
-        err_str = str(e)
-        logger.error(f"Vision AI error: {err_str}")
-        if any(k in err_str.lower() for k in ["429", "quota", "resource_exhausted"]):
-            return "⚠️ *Google Gemini Quota ពេញបណ្ដោះអាសន្ន* សូមរង់ចាំ ១ នាទី រួចផ្ញើរូបភាពម្តងទៀតណា៎!"
-        return f"❌ Vision AI Error: {err_str[:150]}"
+        logger.error(f"Vision AI error: {e}")
+        return format_gemini_error(e)
