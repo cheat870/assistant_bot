@@ -16,12 +16,20 @@ SYSTEM_PROMPT = (
 # In-memory cache for the confirmed working model
 _cached_working_model: Optional[str] = None
 
+# Free-tier stable models in priority order (1.5-flash has generous free quota)
+DEFAULT_CANDIDATES = [
+    "gemini-1.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-pro",
+]
+
 def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT):
     """Synchronous worker that calls Gemini with automatic dynamic model discovery and fallback."""
     from google.genai import types
     global _cached_working_model
 
-    # Try cached model first for maximum speed
+    # Try cached working model first for maximum speed
     if _cached_working_model:
         try:
             return client.models.generate_content(
@@ -33,34 +41,28 @@ def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT):
             )
         except Exception as e:
             err_msg = str(e).lower()
-            if "404" in err_msg or "not found" in err_msg or "not available" in err_msg:
+            if any(k in err_msg for k in ["404", "not found", "not available", "429", "quota", "resource_exhausted"]):
                 logger.warning(f"Cached model {_cached_working_model} failed, resetting cache...")
                 _cached_working_model = None
             else:
                 raise e
 
-    # Default priority candidates
-    candidates = [
-        "gemini-3.5-flash",
-        "gemini-3.1-flash-lite",
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash",
-    ]
+    candidates = list(DEFAULT_CANDIDATES)
 
-    # Dynamically query available models permitted for this API key
+    # Check available models for this specific API key
     try:
         listed = []
         for m in client.models.list():
             name = (m.name or "").replace("models/", "")
             if "flash" in name.lower() and "embed" not in name.lower():
                 listed.append(name)
-        if listed:
-            listed.sort(reverse=True)
-            for m in reversed(listed):
-                if m in candidates:
-                    candidates.remove(m)
-                candidates.insert(0, m)
+        # Prioritize 1.5-flash if available in listed
+        if "gemini-1.5-flash" in listed:
+            listed.remove("gemini-1.5-flash")
+            listed.insert(0, "gemini-1.5-flash")
+        for m in reversed(listed):
+            if m not in candidates:
+                candidates.append(m)
     except Exception as e:
         logger.warning(f"Could not list models: {e}")
 
@@ -81,8 +83,12 @@ def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT):
             return resp
         except Exception as e:
             err_msg = str(e).lower()
-            if "404" in err_msg or "not found" in err_msg or "not available" in err_msg or "not supported" in err_msg:
-                logger.warning(f"Gemini model {model_name} unavailable ({e}), trying next...")
+            is_skippable = any(k in err_msg for k in [
+                "404", "not found", "not available", "not supported",
+                "429", "quota", "resource_exhausted", "exceeded your current quota"
+            ])
+            if is_skippable:
+                logger.warning(f"Gemini model {model_name} skipped ({e}), trying next candidate...")
                 last_err = e
                 continue
             raise e
@@ -100,8 +106,15 @@ async def query_ai(prompt: str) -> str:
             response = await asyncio.to_thread(_call_gemini_api, client, prompt)
             return f"✨ *Gemini ឆ្លើយតប៖*\n\n{response.text}"
         except Exception as e:
-            logger.error(f"Gemini error: {e}")
-            return f"❌ Gemini Error: {str(e)[:150]}"
+            err_str = str(e)
+            logger.error(f"Gemini error: {err_str}")
+            if any(k in err_str.lower() for k in ["429", "quota", "resource_exhausted", "exceeded your current quota"]):
+                return (
+                    "⚠️ *Google Gemini Quota ពេញបណ្ដោះអាសន្ន (Rate Limit 429)*\n\n"
+                    "គណនី Free Tier អនុញ្ញាតឱ្យសួរ ១៥ ដងក្នុង ១ នាទី។\n"
+                    "👉 **សូមរង់ចាំប្រហែល ១ នាទី** រួចសាកល្បងសួរម្តងទៀតណា៎! (កម្រិតកំណត់នឹង Reset ដោយស្វ័យប្រវត្តិ)។"
+                )
+            return f"❌ Gemini Error: {err_str[:150]}"
             
     if OPENAI_API_KEY and OPENAI_API_KEY != "your_openai_api_key_here":
         try:
@@ -165,8 +178,14 @@ async def query_continuous_ai(chat_id: int, user_prompt: str) -> str:
         return reply_text
         
     except Exception as e:
-        logger.error(f"Continuous AI error: {e}")
-        return f"❌ AI Error: {str(e)[:150]}"
+        err_str = str(e)
+        logger.error(f"Continuous AI error: {err_str}")
+        if any(k in err_str.lower() for k in ["429", "quota", "resource_exhausted"]):
+            return (
+                "⚠️ *Google Gemini Quota ពេញបណ្ដោះអាសន្ន (Rate Limit 429)*\n\n"
+                "👉 សូមរង់ចាំប្រហែល ១ នាទី រួចផ្ញើសារម្តងទៀតណា៎!"
+            )
+        return f"❌ AI Error: {err_str[:150]}"
 
 async def process_voice_ai(voice_bytes: bytes, mime_type: str = "audio/ogg") -> str:
     """Understand and respond to Telegram voice message using Gemini."""
@@ -193,8 +212,11 @@ async def process_voice_ai(voice_bytes: bytes, mime_type: str = "audio/ogg") -> 
         return f"🎙️ *Gemini Voice AI ឆ្លើយតប៖*\n\n{reply_text}"
         
     except Exception as e:
-        logger.error(f"Voice AI error: {e}")
-        return f"❌ Voice AI Error: {str(e)[:150]}"
+        err_str = str(e)
+        logger.error(f"Voice AI error: {err_str}")
+        if any(k in err_str.lower() for k in ["429", "quota", "resource_exhausted"]):
+            return "⚠️ *Google Gemini Quota ពេញបណ្ដោះអាសន្ន* សូមរង់ចាំ ១ នាទី រួចផ្ញើសារសំឡេងម្តងទៀតណា៎!"
+        return f"❌ Voice AI Error: {err_str[:150]}"
 
 async def process_vision_ai(image_bytes: bytes, mime_type: str = "image/jpeg", caption: str = "") -> str:
     """Analyze image / OCR / translate / homework solve using Gemini."""
@@ -225,5 +247,8 @@ async def process_vision_ai(image_bytes: bytes, mime_type: str = "image/jpeg", c
         return f"📷 *Gemini Vision AI (OCR & វិភាគរូបភាព)៖*\n\n{reply_text}"
         
     except Exception as e:
-        logger.error(f"Vision AI error: {e}")
-        return f"❌ Vision AI Error: {str(e)[:150]}"
+        err_str = str(e)
+        logger.error(f"Vision AI error: {err_str}")
+        if any(k in err_str.lower() for k in ["429", "quota", "resource_exhausted"]):
+            return "⚠️ *Google Gemini Quota ពេញបណ្ដោះអាសន្ន* សូមរង់ចាំ ១ នាទី រួចផ្ញើរូបភាពម្តងទៀតណា៎!"
+        return f"❌ Vision AI Error: {err_str[:150]}"
