@@ -50,6 +50,18 @@ from handlers.command_handlers import (
     aimode_command,
     qr_command,
     broadcast_command,
+    spend_command,
+    income_command,
+    budget_command,
+    clear_expenses_command,
+    speak_command,
+    check_command,
+    translate_command,
+    song_command,
+    rembg_command,
+    sound_command,
+    news_command,
+    antispam_command,
     handle_voice_message,
     handle_photo_message,
     handle_location_message,
@@ -68,12 +80,23 @@ async def post_init(application: Application):
     """Register official commands in Telegram native menu button."""
     commands = [
         BotCommand("start", "🏠 ផ្ទាំង Dashboard មេ (Main Menu)"),
-        BotCommand("finance", "💰 សេដ្ឋកិច្ច / មាស / សាំង (Finance & Rates)"),
+        BotCommand("budget", "📊 ចំណូល-ចំណាយ (Expense Tracker)"),
+        BotCommand("spend", "💸 កត់ត្រាចំណាយ (Log Expense)"),
+        BotCommand("income", "💰 កត់ត្រាចំណូល (Log Income)"),
+        BotCommand("song", "🎧 ស្វែងរកចម្រៀង MP3 (Music Finder)"),
+        BotCommand("speak", "🗣️ អានជាសំឡេង (Text-to-Speech)"),
+        BotCommand("check", "✍️ ពិនិត្យអក្ខរាវិរុទ្ធខ្មែរ (Spellchecker)"),
+        BotCommand("translate", "🌐 បកប្រែ Pro (English ⬄ Khmer)"),
+        BotCommand("rembg", "✂️ កាត់ Background រូបភាព (Remove BG)"),
+        BotCommand("news", "📰 ព័ត៌មានពេលព្រឹក (Morning News)"),
+        BotCommand("finance", "💵 សេដ្ឋកិច្ច / មាស / សាំង (Finance & Rates)"),
         BotCommand("remind", "⏰ កំណត់សារដាស់តឿន (Set Reminder)"),
         BotCommand("reminders", "📋 បញ្ជីសារដាស់តឿន (Active Reminders)"),
         BotCommand("aimode", "🤖 បើក/បិទ AI Continuous Chat"),
         BotCommand("ask", "✨ សួរសំណួរ AI (Ask Gemini/GPT)"),
         BotCommand("qr", "🔲 បង្កើត QR Code (Generate QR)"),
+        BotCommand("sound", "🔍 ស្វែងរកបទភ្លេង TikTok (Sound Finder)"),
+        BotCommand("antispam", "🛡️ ការពារ Group (Group Anti-Spam)"),
         BotCommand("weather", "🌤️ អាកាសធាតុបច្ចុប្បន្ន (Weather Now)"),
         BotCommand("location", "📍 កំណត់ទីតាំងអាកាសធាតុ (Set Location)"),
         BotCommand("upcoming", "⏳ ថ្ងៃបុណ្យបន្ទាប់ (Upcoming Holidays)"),
@@ -140,6 +163,24 @@ def main():
     app.add_handler(CommandHandler("aimode", aimode_command))
     app.add_handler(CommandHandler("qr", qr_command))
     app.add_handler(CommandHandler("broadcast", broadcast_command))
+    
+    # Register V3 Upgraded Command Handlers (Expenses, TTS, Linguistics, Music, Rembg, News, Anti-Spam)
+    app.add_handler(CommandHandler("budget", budget_command))
+    app.add_handler(CommandHandler("spend", spend_command))
+    app.add_handler(CommandHandler("income", income_command))
+    app.add_handler(CommandHandler("clear_expenses", clear_expenses_command))
+    app.add_handler(CommandHandler("speak", speak_command))
+    app.add_handler(CommandHandler("voice", speak_command))
+    app.add_handler(CommandHandler("check", check_command))
+    app.add_handler(CommandHandler("translate", translate_command))
+    app.add_handler(CommandHandler("tr", translate_command))
+    app.add_handler(CommandHandler("song", song_command))
+    app.add_handler(CommandHandler("music", song_command))
+    app.add_handler(CommandHandler("rembg", rembg_command))
+    app.add_handler(CommandHandler("sound", sound_command))
+    app.add_handler(CommandHandler("identify", sound_command))
+    app.add_handler(CommandHandler("news", news_command))
+    app.add_handler(CommandHandler("antispam", antispam_command))
     
     # Register Callback Query Handler for Buttons
     app.add_handler(CallbackQueryHandler(button_callback_handler))

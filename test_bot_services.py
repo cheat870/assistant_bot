@@ -30,6 +30,11 @@ from database import (
 )
 from services.video_downloader import extract_video_url
 from services.weather_service import fetch_weather, format_weather_message, reverse_geocode_async
+from services.expense_service import parse_expense_text, record_transaction, format_budget_report
+from services.tts_service import generate_tts_audio
+from services.moderation_service import check_spam
+from services.news_service import fetch_morning_headlines
+from database import is_antispam_enabled, set_antispam_enabled, clear_user_expenses
 
 def test_holiday_calendar():
     print("[1] Testing Holiday Calendar Service...")
@@ -113,9 +118,70 @@ async def test_weather_service_async():
     assert loc_name is not None
     print("  [OK] Weather Service verified!")
 
+def test_expense_tracker():
+    print("\n[5] Testing Expense & Income Tracker...")
+    init_db()
+    test_chat = 777666555
+    clear_user_expenses(test_chat)
+
+    # 1. Parse various test cases
+    p1 = parse_expense_text("/spend 5$ coffee", force_type="expense")
+    assert p1["type"] == "expense" and p1["amount"] == 5.0 and p1["currency"] == "USD"
+    record_transaction(test_chat, p1)
+
+    p2 = parse_expense_text("ចាយ 20,000៛ ញ៉ាំបាយ")
+    assert p2["type"] == "expense" and p2["amount"] == 20000.0 and p2["currency"] == "KHR"
+    record_transaction(test_chat, p2)
+
+    p3 = parse_expense_text("/income 500$ monthly salary", force_type="income")
+    assert p3["type"] == "income" and p3["amount"] == 500.0 and p3["currency"] == "USD"
+    record_transaction(test_chat, p3)
+
+    rep = format_budget_report(test_chat, days=30)
+    assert "500.00 $" in rep
+    assert "5.00 $" in rep
+    assert "20,000 ៛" in rep
+    print("  - Budget report generated with USD and KHR balances!")
+    print("  [OK] Expense & Income Tracker verified!")
+
+def test_tts_service():
+    print("\n[6] Testing Text-to-Speech (TTS)...")
+    km_fp = generate_tts_audio("សួស្តីកម្ពុជា")
+    assert len(km_fp.getvalue()) > 5000, "Should generate valid audio bytes"
+    en_fp = generate_tts_audio("Hello from Telegram Bot")
+    assert len(en_fp.getvalue()) > 5000, "Should generate valid audio bytes"
+    print(f"  - Khmer speech bytes: {len(km_fp.getvalue())}, English: {len(en_fp.getvalue())}")
+    print("  [OK] TTS Service verified!")
+
+def test_moderation_service():
+    print("\n[7] Testing Anti-Spam & Moderation...")
+    spam1, _ = check_spam("កាស៊ីណូអនឡាញ ឈ្នះ 100% ចុះឈ្មោះឥឡូវនេះ")
+    assert spam1 is True, "Should detect Khmer casino spam"
+    
+    clean1, _ = check_spam("សួស្តីបងប្អូន ស្អែកមានប្រជុំម៉ោង 10")
+    assert clean1 is False, "Should pass normal conversation"
+
+    test_chat = 123456789
+    set_antispam_enabled(test_chat, True)
+    assert is_antispam_enabled(test_chat) is True
+    set_antispam_enabled(test_chat, False)
+    assert is_antispam_enabled(test_chat) is False
+    print("  [OK] Anti-Spam & Moderation verified!")
+
+async def test_news_service_async():
+    print("\n[8] Testing News RSS Service...")
+    headlines = await fetch_morning_headlines()
+    assert len(headlines["cambodia"]) > 0 or len(headlines["tech"]) > 0
+    print(f"  - Cambodia headlines: {len(headlines['cambodia'])}, Tech headlines: {len(headlines['tech'])}")
+    print("  [OK] News Service verified!")
+
 if __name__ == "__main__":
     test_holiday_calendar()
     test_database()
     test_video_url_extractor()
     asyncio.run(test_weather_service_async())
-    print("\n🎉 ALL TESTS (HOLIDAY + VIDEO + WEATHER 5AM) PASSED SUCCESSFULLY! ✅")
+    test_expense_tracker()
+    test_tts_service()
+    test_moderation_service()
+    asyncio.run(test_news_service_async())
+    print("\n🎉 ALL 8 TEST SUITES PASSED SUCCESSFULLY! ✅")

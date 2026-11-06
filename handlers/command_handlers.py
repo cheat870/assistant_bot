@@ -27,6 +27,9 @@ from database import (
     set_ai_mode,
     clear_chat_history,
     get_all_registered_chats,
+    is_antispam_enabled,
+    set_antispam_enabled,
+    clear_user_expenses,
 )
 from services.holiday_calendar import (
     format_upcoming_message,
@@ -52,6 +55,17 @@ from services.ai_service import (
 )
 from services.finance_service import format_finance_report, convert_currency_text
 from services.tools_service import generate_qr_code, read_qr_code
+from services.expense_service import (
+    parse_expense_text,
+    record_transaction,
+    format_record_success,
+    format_budget_report,
+)
+from services.tts_service import generate_tts_audio
+from services.linguistics_service import check_khmer_spelling, translate_pro
+from services.music_service import download_song, identify_tiktok_sound
+from services.image_service import remove_background
+from services.news_service import generate_morning_news_digest
 
 logger = logging.getLogger(__name__)
 
@@ -109,13 +123,16 @@ def get_welcome_text(user_first_name: str) -> str:
         f"🌟 *មជ្ឈមណ្ឌលជំនួយការឆ្លាតវៃ (Smart Assistant Hub)* 🇰🇭\n\n"
         f"👋 សួស្តី *{user_first_name}*! សូមជ្រើសរើសមុខងារដែលអ្នកត្រូវការប្រើប្រាស់៖\n\n"
         "📥 *១. Video Downloader:* Copy link (TikTok, YouTube, Facebook, IG, X) ផ្ញើចូលទីនេះភ្លាមៗ\n"
-        "🎞️ *២. គុណភាព & Cover:* ទាញយក MP3, Cover HD ឬជ្រើសរើស Resolution (1080p, 720p, 480p)\n"
-        "💰 *៣. សេដ្ឋកិច្ចកម្ពុជា:* អត្រាប្តូរប្រាក់ NBC/USD/KHR, តម្លៃមាស (តម្លឹង/ជី), តម្លៃប្រេងឥន្ធនៈ\n"
-        "🤖 *៤. AI ឆ្លាតវៃ:* ជជែកជាសំឡេង (Voice AI), អានរូបភាព/ឯកសារ/ដោះស្រាយលំហាត់ (Vision OCR), Continuous Chat Mode\n"
-        "🔔 *៥. សារដាស់តឿន:* កំណត់ម៉ោងរំលឹកកិច្ចការ `/remind 08:30 ជួបភ្ញៀវ`\n"
-        "🔲 *៦. ឧបករណ៍ QR:* បង្កើត/អាន QR Code និង KHQR\n"
-        "🌤️ *៧. អាកាសធាតុ ៥:០០ ព្រឹក:* ផ្ញើតាមទីតាំងជាក់ស្តែងរាល់ព្រឹក\n"
-        "🗓️ *៨. ប្រតិទិនបុណ្យជាតិ ៤:០០ ព្រឹក:* ជូនដំណឹងទៀបភ្លឺរាល់ថ្ងៃបុណ្យជាតិ\n\n"
+        "🎧 *២. ចម្រៀង MP3:* វាយ `/song <ឈ្មោះបទ>` ទាញយក file MP3 320kbps ភ្លាមៗ\n"
+        "📊 *៣. កត់ត្រាចំណូល-ចំណាយ:* វាយ `/spend 5$ coffee` ឬ `ចាយ 20,000៛ ញ៉ាំបាយ` មើលរបាយការណ៍ `/budget`\n"
+        "🗣️ *៤. អានជាសំឡេង (TTS):* វាយ `/speak <អត្ថបទ>` បម្លែងអក្សរទៅជាសំឡេងនិយាយភាសាខ្មែរ/អង់គ្លេស\n"
+        "✍️ *៥. ពិនិត្យអក្ខរាវិរុទ្ធខ្មែរ:* វាយ `/check <អត្ថបទ>` កែតម្រូវតាមវចនានុក្រម សម្តេច ជួន ណាត\n"
+        "🌐 *៦. បកប្រែភាសា Pro:* វាយ `/translate <អត្ថបទ>` បកប្រែ English ⬄ Khmer ជាមួយការបញ្ចេញសំឡេង\n"
+        "✂️ *៧. កាត់ Background រូបភាព:* ផ្ញើរូបភាព ឬ Reply ដោយវាយ `/rembg` ក្លាយជា Transparent PNG\n"
+        "💰 *៨. សេដ្ឋកិច្ចកម្ពុជា:* អត្រាប្តូរប្រាក់ NBC/USD/KHR, តម្លៃមាស, តម្លៃប្រេងឥន្ធនៈ (`/finance`)\n"
+        "📰 *៩. ព័ត៌មានពេលព្រឹក ៧:០០ AM:* សេចក្តីសង្ខេបព័ត៌មានជាតិ & បច្ចេកវិទ្យា (`/news`)\n"
+        "🛡️ *១០. ការពារ Group Telegram:* ទប់ស្កាត់ Spam, Casino Ads & Bot ក្លែងក្លាយ (`/antispam`)\n"
+        "🔔 *១១. សារដាស់តឿន & អាកាសធាតុ:* `/remind` និងដំណឹងអាកាសធាតុ ៥:០០ ព្រឹកស្វ័យប្រវត្ត\n\n"
         "👇 _សូមចុចជ្រើសរើស Menu ខាងក្រោម៖_"
     )
 
@@ -136,10 +153,14 @@ def get_main_menu_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     keyboard = [
         [
             InlineKeyboardButton("📥 របៀបទាញយកវីដេអូ", callback_data="btn_video_help"),
+            InlineKeyboardButton("🎧 ស្វែងរកចម្រៀង MP3", callback_data="btn_music_help"),
+        ],
+        [
+            InlineKeyboardButton("📊 ចំណូល-ចំណាយ (Budget)", callback_data="btn_budget"),
             InlineKeyboardButton("💰 សេដ្ឋកិច្ច / មាស / សាំង", callback_data="btn_finance"),
         ],
         [
-            InlineKeyboardButton("🗓️ ប្រតិទិនបុណ្យជាតិ", callback_data="btn_calendar_2026"),
+            InlineKeyboardButton("📰 ព័ត៌មានពេលព្រឹក 7AM", callback_data="btn_news"),
             InlineKeyboardButton("🌤️ អាកាសធាតុបច្ចុប្បន្ន", callback_data="btn_weather_now"),
         ],
         [
@@ -164,11 +185,12 @@ def get_main_menu_keyboard(chat_id: int) -> InlineKeyboardMarkup:
 def get_persistent_bottom_keyboard() -> ReplyKeyboardMarkup:
     """Persistent reply keyboard displayed at the bottom of the chat."""
     keyboard = [
-        [KeyboardButton("💰 សេដ្ឋកិច្ច/មាស/សាំង"), KeyboardButton("🌤️ អាកាសធាតុ")],
+        [KeyboardButton("📊 ចំណូល-ចំណាយ"), KeyboardButton("💰 សេដ្ឋកិច្ច/មាស/សាំង")],
+        [KeyboardButton("🌤️ អាកាសធាតុ"), KeyboardButton("📰 ព័ត៌មានពេលព្រឹក")],
         [KeyboardButton("📍 ផ្ញើទីតាំង GPS", request_location=True), KeyboardButton("⏰ Reminders")],
-        [KeyboardButton("📥 របៀបទាញយក"), KeyboardButton("🗓️ ប្រតិទិនបុណ្យជាតិ")],
         [KeyboardButton("✨ AI Chat"), KeyboardButton("🏠 ផ្ទាំង Menu មេ")]
     ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 def get_back_keyboard() -> InlineKeyboardMarkup:
@@ -452,6 +474,361 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # -------------------------------------------------------------
+# Personal Expense & Income Tracker Handlers
+# -------------------------------------------------------------
+async def spend_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Record an expense: /spend 5$ coffee or /spend 20000r lunch."""
+    raw = " ".join(context.args) if context.args else ""
+    if not raw:
+        await update.message.reply_text(
+            "💸 *របៀបកត់ត្រាចំណាយ (Expense Tracker)៖*\n\n"
+            "សូមវាយ៖ `/spend <ចំនួនទឹកប្រាក់> <ចំណាំ>`\n\n"
+            "• ឧទាហរណ៍៖ `/spend 5$ coffee`\n"
+            "• ឧទាហរណ៍៖ `/spend 20,000៛ ញ៉ាំបាយ`\n"
+            "• ឧទាហរណ៍៖ `/spend 15 USD សាំងឡាន`\n\n"
+            "💡 _អ្នកក៏អាចវាយជាភាសាខ្មែរធម្មតាបានដែរ ដូចជា:_ `ចាយ 20,000៛ ញ៉ាំបាយ`",
+            parse_mode="Markdown"
+        )
+        return
+        
+    parsed = parse_expense_text(raw, force_type="expense")
+    if not parsed:
+        await update.message.reply_text(
+            "⚠️ មិនអាចស្គាល់ចំនួនទឹកប្រាក់បានឡើយ។ សូមបញ្ជាក់ដូចជា `/spend 5$ coffee` ឬ `/spend 20,000៛ បាយ`។"
+        )
+        return
+        
+    record_transaction(update.effective_chat.id, parsed)
+    msg = format_record_success(parsed)
+    await safe_reply_text(update.message, msg)
+
+async def income_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Record an income: /income 500$ monthly salary."""
+    raw = " ".join(context.args) if context.args else ""
+    if not raw:
+        await update.message.reply_text(
+            "💰 *របៀបកត់ត្រាចំណូល (Income Tracker)៖*\n\n"
+            "សូមវាយ៖ `/income <ចំនួនទឹកប្រាក់> <ចំណាំ>`\n\n"
+            "• ឧទាហរណ៍៖ `/income 500$ ប្រាក់ខែ`\n"
+            "• ឧទាហរណ៍៖ `/income 200$ លក់ទំនិញ`\n\n"
+            "💡 _អ្នកក៏អាចវាយជាភាសាខ្មែរធម្មតាបានដែរ ដូចជា:_ `ចំណូល 50$ រកស៊ី`",
+            parse_mode="Markdown"
+        )
+        return
+        
+    parsed = parse_expense_text(raw, force_type="income")
+    if not parsed:
+        await update.message.reply_text(
+            "⚠️ មិនអាចស្គាល់ចំនួនទឹកប្រាក់បានឡើយ។ សូមបញ្ជាក់ដូចជា `/income 500$ salary`។"
+        )
+        return
+        
+    record_transaction(update.effective_chat.id, parsed)
+    msg = format_record_success(parsed)
+    await safe_reply_text(update.message, msg)
+
+async def budget_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """View comprehensive budget & expense report: /budget."""
+    report = format_budget_report(update.effective_chat.id, days=30)
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔄 ធ្វើបច្ចុប្បន្នភាព", callback_data="btn_budget"),
+            InlineKeyboardButton("🗑️ សម្អាតប្រវត្តិ", callback_data="btn_clear_expenses_ask")
+        ],
+        [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+    ])
+    await safe_reply_text(update.message, report, reply_markup=keyboard)
+
+async def clear_expenses_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Clear all expense records for this chat: /clear_expenses."""
+    chat_id = update.effective_chat.id
+    count = clear_user_expenses(chat_id)
+    await update.message.reply_text(f"✅ បានលុបកំណត់ត្រាចំណូល-ចំណាយចំនួន {count} ជោគជ័យ!")
+
+# -------------------------------------------------------------
+# Text-to-Speech (TTS) & Audio Speech Handler
+# -------------------------------------------------------------
+async def speak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate audio voice note from text: /speak <text>."""
+    text = " ".join(context.args) if context.args else ""
+    if not text and update.message.reply_to_message and update.message.reply_to_message.text:
+        text = update.message.reply_to_message.text
+        
+    if not text:
+        await update.message.reply_text(
+            "🗣️ *របៀបប្រើប្រាស់ Text-to-Speech (សំឡេងខ្មែរ/អង់គ្លេស)៖*\n\n"
+            "សូមវាយ៖ `/speak <អត្ថបទ>`\n"
+            "ឬ Reply លើសារណាមួយរួចវាយ `/speak`\n\n"
+            "• ឧទាហរណ៍៖ `/speak សួស្តីបងប្អូនទាំងអស់គ្នា!`",
+            parse_mode="Markdown"
+        )
+        return
+        
+    await update.message.chat.send_action("record_voice")
+    try:
+        audio_fp = generate_tts_audio(text)
+        await update.message.reply_voice(
+            voice=audio_fp,
+            caption=f"🗣️ *សំឡេងអាន៖* _{text[:50]}..._",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"Error generating TTS: {e}")
+        await update.message.reply_text(f"❌ មិនអាចបម្លែងជាសំឡេងបានទេ៖ {str(e)[:100]}")
+
+# -------------------------------------------------------------
+# Khmer Spellchecker & Grammar Handler
+# -------------------------------------------------------------
+async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Khmer spellcheck & grammar review: /check <text>."""
+    text = " ".join(context.args) if context.args else ""
+    if not text and update.message.reply_to_message and update.message.reply_to_message.text:
+        text = update.message.reply_to_message.text
+
+    if not text:
+        await update.message.reply_text(
+            "✍️ *របៀបពិនិត្យអក្ខរាវិរុទ្ធខ្មែរ (Chuon Nath Dictionary)៖*\n\n"
+            "សូមវាយ៖ `/check <អត្ថបទខ្មែរ>`\n"
+            "ឬ Reply លើសារណាមួយរួចវាយ `/check`\n\n"
+            "AI នឹងជួយកែពាក្យខុសឱ្យត្រូវតាមវចនានុក្រមសម្តេច ជួន ណាត និងកែលម្អឃ្លាប្រយោគឱ្យកាន់តែពិរោះ!",
+            parse_mode="Markdown"
+        )
+        return
+
+    status_msg = await update.message.reply_text("🔍 *កំពុងពិនិត្យអក្ខរាវិរុទ្ធ និងវេយ្យាករណ៍...* ✍️", parse_mode="Markdown")
+    try:
+        result = await check_khmer_spelling(text)
+        await safe_edit_text(status_msg, result)
+    except Exception as e:
+        logger.error(f"Check command error: {e}")
+        await safe_edit_text(status_msg, f"❌ កំហុស៖ {str(e)[:120]}")
+
+# -------------------------------------------------------------
+# Pro Translation (English <-> Khmer) Handler
+# -------------------------------------------------------------
+async def translate_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Pro Translation: /translate <text>."""
+    text = " ".join(context.args) if context.args else ""
+    if not text and update.message.reply_to_message and update.message.reply_to_message.text:
+        text = update.message.reply_to_message.text
+
+    if not text:
+        await update.message.reply_text(
+            "🌐 *របៀបបកប្រែភាសា Pro (English ⬄ Khmer)៖*\n\n"
+            "សូមវាយ៖ `/translate <អត្ថបទ>` (ឬកាត់ខ្លី `/tr <អត្ថបទ>`)\n"
+            "ឬ Reply លើសារណាមួយរួចវាយ `/translate`\n\n"
+            "Bot នឹងបកប្រែយ៉ាងលម្អិត រួមទាំងការពន្យល់ពាក្យគន្លឹះ និងការបញ្ចេញសំឡេង!",
+            parse_mode="Markdown"
+        )
+        return
+
+    status_msg = await update.message.reply_text("🌐 *កំពុងដំណើរការបកប្រែ Pro...*", parse_mode="Markdown")
+    try:
+        result = await translate_pro(text)
+        await safe_edit_text(status_msg, result)
+    except Exception as e:
+        logger.error(f"Translate error: {e}")
+        await safe_edit_text(status_msg, f"❌ កំហុស៖ {str(e)[:120]}")
+
+# -------------------------------------------------------------
+# Music Finder & MP3 Downloader Handler
+# -------------------------------------------------------------
+async def song_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Search & download song MP3: /song <query>."""
+    query = " ".join(context.args) if context.args else ""
+    if not query:
+        await update.message.reply_text(
+            "🎧 *របៀបស្វែងរក និងទាញយកចម្រៀង MP3 320kbps៖*\n\n"
+            "សូមវាយ៖ `/song <ឈ្មោះបទចម្រៀង ឬឈ្មោះតារា>`\n\n"
+            "• ឧទាហរណ៍៖ `/song ស្រលាញ់គ្នាម្តងទៀតបានទេ`\n"
+            "• ឧទាហរណ៍៖ `/song shape of you`\n\n"
+            "Bot នឹងស្វែងរក និងទាញយក file MP3 កម្រិតច្បាស់ជូនភ្លាមៗ!",
+            parse_mode="Markdown"
+        )
+        return
+
+    status_msg = await update.message.reply_text(
+        f"🔍 *កំពុងស្វែងរក និងទាញយកបទចម្រៀង៖* `{query}` 🎶\n_សូមរង់ចាំប្រហែល ៥-១០ វិនាទី..._",
+        parse_mode="Markdown"
+    )
+    await update.message.chat.send_action("upload_voice")
+
+    from services.video_downloader import cleanup_file
+    try:
+        res = await download_song(query)
+        file_path = res["file_path"]
+        with open(file_path, "rb") as audio_file:
+            caption = (
+                f"🎧 *{res['title']}*\n"
+                f"👤 *តារាចម្រៀង:* {res['performer']}\n"
+                f"⏱️ *រយៈពេល:* {res['duration_str']}\n\n"
+                f"✨ Smart Assistant Bot 🎵"
+            )
+            await update.message.reply_audio(
+                audio=audio_file,
+                title=res["title"],
+                performer=res["performer"],
+                duration=res["duration"],
+                caption=caption,
+                parse_mode="Markdown"
+            )
+        cleanup_file(file_path)
+        try:
+            import shutil
+            shutil.rmtree(res["temp_dir"], ignore_errors=True)
+            await status_msg.delete()
+        except Exception:
+            pass
+    except Exception as e:
+        logger.error(f"Song download error: {e}")
+        await safe_edit_text(status_msg, f"❌ មិនអាចទាញយកចម្រៀងបានទេ៖ {str(e)[:150]}")
+
+# -------------------------------------------------------------
+# AI Background Remover Handler
+# -------------------------------------------------------------
+async def rembg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remove background from a photo: /rembg."""
+    photo = None
+    if update.message.photo:
+        photo = update.message.photo[-1]
+    elif update.message.reply_to_message and update.message.reply_to_message.photo:
+        photo = update.message.reply_to_message.photo[-1]
+
+    if not photo:
+        await update.message.reply_text(
+            "✂️ *របៀបកាត់ផ្ទៃខាងក្រោយរូបភាព (AI Background Remover)៖*\n\n"
+            "1. ផ្ញើរូបភាពដោយសរសេរ Caption ថា `/rembg`\n"
+            "2. ឬ Reply លើរូបថតណាមួយដោយវាយ `/rembg`\n\n"
+            "Bot នឹងកាត់ Background ចេញភ្លាមៗក្លាយជា File PNG Transparent!",
+            parse_mode="Markdown"
+        )
+        return
+
+    status_msg = await update.message.reply_text("✂️ *កំពុងកាត់ផ្ទៃខាងក្រោយរូបភាព (Background Remover)...*", parse_mode="Markdown")
+    await update.message.chat.send_action("upload_document")
+    try:
+        tg_file = await context.bot.get_file(photo.file_id)
+        raw_bytes = await tg_file.download_as_bytearray()
+        png_fp = await remove_background(bytes(raw_bytes))
+
+        png_fp.name = "transparent_cutout.png"
+        await update.message.reply_document(
+            document=png_fp,
+            caption="✂️ *រូបភាពរបស់អ្នកត្រូវបានកាត់ផ្ទៃខាងក្រោយជោគជ័យ!* ✨\n_ជាទម្រង់ Transparent PNG_",
+            parse_mode="Markdown"
+        )
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+    except Exception as e:
+        logger.error(f"Rembg error: {e}")
+        await safe_edit_text(status_msg, f"❌ មិនអាចកាត់ background បានទេ៖ {str(e)[:120]}")
+
+# -------------------------------------------------------------
+# TikTok Sound Identifier Handler
+# -------------------------------------------------------------
+async def sound_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Identify soundtrack from TikTok/video URL: /sound <url>."""
+    from services.video_downloader import extract_video_url
+    url = context.args[0] if context.args else None
+    if not url and update.message.reply_to_message and update.message.reply_to_message.text:
+        url = extract_video_url(update.message.reply_to_message.text)
+
+    if not url:
+        await update.message.reply_text(
+            "🔍 *របៀបស្វែងរកប្រភពបទភ្លេង (TikTok Sound Identifier)៖*\n\n"
+            "សូមវាយ៖ `/sound <Link វីដេអូ TikTok>`\n"
+            "ឬ Reply លើសារដែលមាន Link ដោយវាយ `/sound`\n\n"
+            "Bot នឹងស្រង់យកឈ្មោះបទចម្រៀង និងតារាចម្រៀងដើមជូន!",
+            parse_mode="Markdown"
+        )
+        return
+
+    status_msg = await update.message.reply_text("🔍 *កំពុងស្រង់យកឈ្មោះបទចម្រៀងដើម...*", parse_mode="Markdown")
+    try:
+        sound_info = await identify_tiktok_sound(url)
+        track = sound_info["track"]
+        artist = sound_info["artist"]
+        album = sound_info["album"]
+        title = sound_info["title"]
+
+        msg = (
+            f"🎵 *ប្រភពបទភ្លេង / Soundtrack ដែលរកឃើញ៖* ✨\n\n"
+            f"🎼 *ឈ្មោះបទ:* `{track}`\n"
+            f"👤 *អ្នកបង្កើត/តារា:* `{artist}`\n"
+            f"💿 *អាល់ប៊ុម:* `{album}`\n"
+            f"🎬 *វីដេអូដើម:* {title[:60]}\n\n"
+            f"💡 _អ្នកអាចវាយ_ `/song {track}` _ដើម្បីទាញយកបទពេញជា MP3 បាន!_"
+        )
+        await safe_edit_text(status_msg, msg)
+    except Exception as e:
+        logger.error(f"Sound identifier error: {e}")
+        await safe_edit_text(status_msg, f"❌ មិនអាចស្គាល់បទភ្លេងក្នុងវីដេអូនេះទេ៖ {str(e)[:120]}")
+
+# -------------------------------------------------------------
+# Morning News Digest Handler
+# -------------------------------------------------------------
+async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """View Morning News Digest: /news."""
+    status_msg = await update.message.reply_text("📰 *កំពុងទាញយកព័ត៌មានជាតិ & បច្ចេកវិទ្យា...*", parse_mode="Markdown")
+    try:
+        digest = await generate_morning_news_digest()
+        await safe_edit_text(status_msg, digest)
+    except Exception as e:
+        logger.error(f"News error: {e}")
+        await safe_edit_text(status_msg, f"❌ មិនអាចទាញយកព័ត៌មានបានទេ៖ {str(e)[:120]}")
+
+# -------------------------------------------------------------
+# Group Anti-Spam & Moderation Control Handler
+# -------------------------------------------------------------
+async def antispam_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle Anti-Spam protection in Telegram groups: /antispam [on|off]."""
+    chat = update.effective_chat
+    user = update.effective_user
+
+    if chat.type not in ["group", "supergroup"]:
+        await update.message.reply_text("⚠️ *មុខងារនេះដំណើរការតែនៅក្នុង Group ឬ Supergroup ប៉ុណ្ណោះ!*", parse_mode="Markdown")
+        return
+
+    # Check if user is administrator
+    try:
+        member = await context.bot.get_chat_member(chat.id, user.id)
+        if member.status not in ["creator", "administrator"] and user.id != ADMIN_USER_ID:
+            await update.message.reply_text("⛔ *មានតែ Admin នៃ Group ប៉ុណ្ណោះដែលអាចកំណត់ Anti-Spam បាន!*", parse_mode="Markdown")
+            return
+    except Exception as e:
+        logger.warning(f"Failed to check member status: {e}")
+
+    arg = (context.args[0] if context.args else "").lower()
+    if arg in ["on", "enable", "បើក"]:
+        set_antispam_enabled(chat.id, True)
+        await update.message.reply_text(
+            "🛡️ *ប្រព័ន្ធការពារ Spam & Casino Ads ត្រូវបាន [បើក] ជោគជ័យ!* ✅\n\n"
+            "Bot នឹងស្វែងរក និងលុបសារផ្សាយពាណិជ្ជកម្មល្បែងស៊ីសង (កាស៊ីណូ, បាការ៉ាត់, ស្លុត) "
+            "និង Link មេរោគដោយស្វ័យប្រវត្តិ។",
+            parse_mode="Markdown"
+        )
+    elif arg in ["off", "disable", "បិទ"]:
+        set_antispam_enabled(chat.id, False)
+        await update.message.reply_text(
+            "⚠️ *ប្រព័ន្ធការពារ Spam & Casino Ads ត្រូវបាន [បិទ]!*",
+            parse_mode="Markdown"
+        )
+    else:
+        current_status = is_antispam_enabled(chat.id)
+        status_str = "✅ កំពុងបើក (Active)" if current_status else "❌ បានបិទ (Disabled)"
+        await update.message.reply_text(
+            f"🛡️ *ការកំណត់ប្រព័ន្ធការពារ Spam ក្នុង Group៖*\n\n"
+            f"• ស្ថានភាពបច្ចុប្បន្ន៖ *{status_str}*\n\n"
+            f"👉 របៀបកំណត់៖\n"
+            f"• `/antispam on` ➔ ដើម្បីបើក\n"
+            f"• `/antispam off` ➔ ដើម្បីបិទ",
+            parse_mode="Markdown"
+        )
+
+
+# -------------------------------------------------------------
 # Safe Message Sender & Editor (Protects against Markdown parse errors)
 # -------------------------------------------------------------
 async def safe_reply_text(message, text: str, reply_markup=None, parse_mode="Markdown"):
@@ -512,6 +889,24 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
         tg_file = await context.bot.get_file(photo.file_id)
         img_bytes = bytes(await tg_file.download_as_bytearray())
         
+        # Check if caption requests background removal
+        caption_lower = caption.lower()
+        if "/rembg" in caption_lower or "កាត់" in caption_lower or "background" in caption_lower:
+            status = await update.message.reply_text("✂️ *កំពុងកាត់ផ្ទៃខាងក្រោយរូបភាព (Background Remover)...*", parse_mode="Markdown")
+            await update.message.chat.send_action("upload_document")
+            png_fp = await remove_background(img_bytes)
+            png_fp.name = "transparent_cutout.png"
+            await update.message.reply_document(
+                document=png_fp,
+                caption="✂️ *រូបភាពរបស់អ្នកត្រូវបានកាត់ផ្ទៃខាងក្រោយជោគជ័យ!* ✨\n_ជាទម្រង់ Transparent PNG_",
+                parse_mode="Markdown"
+            )
+            try:
+                await status.delete()
+            except Exception:
+                pass
+            return
+
         # 1. First check if it's a QR code / KHQR
         qr_text = read_qr_code(img_bytes)
         if qr_text and not caption:
@@ -818,6 +1213,73 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 ]),
                 parse_mode="Markdown"
             )
+
+        elif data == "btn_budget":
+            await query.answer("កំពុងរៀបចំរបាយការណ៍ចំណូល-ចំណាយ...")
+            rep = format_budget_report(chat_id, days=30)
+            await query.edit_message_text(
+                rep,
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("🔄 ធ្វើបច្ចុប្បន្នភាព", callback_data="btn_budget"),
+                        InlineKeyboardButton("🗑️ សម្អាតប្រវត្តិ", callback_data="btn_clear_expenses_ask")
+                    ],
+                    [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+                ]),
+                parse_mode="Markdown"
+            )
+
+        elif data == "btn_clear_expenses_ask":
+            await query.answer()
+            confirm_kb = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("⚠️ បាទ/ចាស! លុបទាំងអស់", callback_data="btn_clear_expenses_confirm"),
+                    InlineKeyboardButton("❌ ទេ! ត្រឡប់ក្រោយ", callback_data="btn_budget")
+                ]
+            ])
+            await query.edit_message_text(
+                "⚠️ *តើអ្នកពិតជាចង់លុបប្រវត្តិកត់ត្រាចំណូល-ចំណាយទាំងអស់មែនទេ?*\n\n"
+                "_ទិន្នន័យដែលលុបហើយមិនអាចយកមកវិញបានឡើយ!_",
+                reply_markup=confirm_kb,
+                parse_mode="Markdown"
+            )
+
+        elif data == "btn_clear_expenses_confirm":
+            count = clear_user_expenses(chat_id)
+            await query.answer(f"✅ បានលុបកំណត់ត្រាចំនួន {count} រួចរាល់!", show_alert=True)
+            rep = format_budget_report(chat_id, days=30)
+            await query.edit_message_text(
+                rep,
+                reply_markup=get_back_keyboard(),
+                parse_mode="Markdown"
+            )
+
+        elif data == "btn_news":
+            await query.answer("កំពុងទាញយកព័ត៌មានជាតិ & បច្ចេកវិទ្យា...")
+            news_rep = await generate_morning_news_digest()
+            await query.edit_message_text(
+                news_rep,
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("🔄 ធ្វើបច្ចុប្បន្នភាព", callback_data="btn_news"),
+                        InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+                    ]
+                ]),
+                parse_mode="Markdown"
+            )
+
+        elif data == "btn_music_help":
+            await query.answer()
+            m_help = (
+                "🎧 *ស្វែងរក និងទាញយកចម្រៀង MP3 320kbps៖*\n\n"
+                "• វាយពាក្យបញ្ជា៖ `/song <ឈ្មោះបទ ឬតារាចម្រៀង>`\n"
+                "• ឧទាហរណ៍៖ `/song ស្រលាញ់គ្នាម្តងទៀតបានទេ`\n"
+                "• ឧទាហរណ៍៖ `/song shape of you`\n\n"
+                "🔍 *ស្វែងរកប្រភពបទភ្លេង TikTok (Sound Identifier)៖*\n"
+                "• វាយ៖ `/sound <Link វីដេអូ TikTok>`\n\n"
+                "Bot នឹងទាញយក file MP3 កម្រិតច្បាស់ ព្រមទាំងរូប Cover Album ជូនភ្លាមៗ!"
+            )
+            await query.edit_message_text(m_help, reply_markup=get_back_keyboard(), parse_mode="Markdown")
             
         elif data == "btn_toggle_aimode":
             current = is_ai_mode(chat_id)

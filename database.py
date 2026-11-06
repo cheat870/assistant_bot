@@ -1,6 +1,6 @@
 import sqlite3
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 from config import DB_PATH
 
 def init_db():
@@ -72,6 +72,30 @@ def init_db():
             role TEXT,
             content TEXT,
             created_at TEXT
+        )
+    """)
+
+    # Table for Personal Expense & Income Tracker
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS expenses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER,
+            type TEXT, -- 'expense' or 'income'
+            amount REAL,
+            currency TEXT, -- 'USD' or 'KHR'
+            category TEXT,
+            note TEXT,
+            created_at TEXT
+        )
+    """)
+
+    # Table for Group Settings (Anti-Spam & Moderation)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS group_settings (
+            chat_id INTEGER PRIMARY KEY,
+            antispam_enabled INTEGER DEFAULT 1,
+            welcome_enabled INTEGER DEFAULT 1,
+            updated_at TEXT
         )
     """)
     
@@ -361,8 +385,162 @@ def get_all_registered_chats() -> List[int]:
             SELECT chat_id FROM weather_settings
             UNION
             SELECT chat_id FROM ai_sessions
+            UNION
+            SELECT chat_id FROM expenses
         )
     """)
     rows = cursor.fetchall()
     conn.close()
     return [r[0] for r in rows]
+
+# -------------------------------------------------------------
+# Personal Expense & Income Tracker Operations
+# -------------------------------------------------------------
+def add_transaction(chat_id: int, tx_type: str, amount: float, currency: str, category: str, note: str) -> int:
+    """Record an income or expense transaction."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    now_str = datetime.utcnow().isoformat()
+    cursor.execute("""
+        INSERT INTO expenses (chat_id, type, amount, currency, category, note, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (chat_id, tx_type, amount, currency.upper(), category, note, now_str))
+    tx_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return tx_id
+
+def get_expense_summary(chat_id: int, days: int = 30) -> Dict[str, Any]:
+    """Calculate expense & income totals and category breakdown over past N days."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    since_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
+    
+    # Total expense & income by currency
+    cursor.execute("""
+        SELECT type, currency, SUM(amount)
+        FROM expenses
+        WHERE chat_id = ? AND created_at >= ?
+        GROUP BY type, currency
+    """, (chat_id, since_date))
+    rows = cursor.fetchall()
+    
+    summary = {
+        "expense_usd": 0.0,
+        "expense_khr": 0.0,
+        "income_usd": 0.0,
+        "income_khr": 0.0,
+        "categories_usd": {},
+        "categories_khr": {}
+    }
+    
+    for tx_type, curr, total in rows:
+        val = float(total or 0.0)
+        curr_upper = (curr or "USD").upper()
+        if tx_type == "expense":
+            if curr_upper == "KHR":
+                summary["expense_khr"] = val
+            else:
+                summary["expense_usd"] = val
+        elif tx_type == "income":
+            if curr_upper == "KHR":
+                summary["income_khr"] = val
+            else:
+                summary["income_usd"] = val
+
+    # Category breakdown for expenses
+    cursor.execute("""
+        SELECT category, currency, SUM(amount)
+        FROM expenses
+        WHERE chat_id = ? AND type = 'expense' AND created_at >= ?
+        GROUP BY category, currency
+        ORDER BY SUM(amount) DESC
+    """, (chat_id, since_date))
+    cat_rows = cursor.fetchall()
+    for cat, curr, total in cat_rows:
+        curr_upper = (curr or "USD").upper()
+        val = float(total or 0.0)
+        if curr_upper == "KHR":
+            summary["categories_khr"][cat] = val
+        else:
+            summary["categories_usd"][cat] = val
+
+    conn.close()
+    return summary
+
+def get_recent_transactions(chat_id: int, limit: int = 10) -> List[Dict[str, Any]]:
+    """Retrieve recent transaction history for a user."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, type, amount, currency, category, note, created_at
+        FROM expenses
+        WHERE chat_id = ?
+        ORDER BY id DESC LIMIT ?
+    """, (chat_id, limit))
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {
+            "id": r[0],
+            "type": r[1],
+            "amount": r[2],
+            "currency": r[3],
+            "category": r[4],
+            "note": r[5],
+            "created_at": r[6]
+        }
+        for r in rows
+    ]
+
+def delete_transaction(tx_id: int, chat_id: int) -> bool:
+    """Delete a transaction by ID."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM expenses WHERE id = ? AND chat_id = ?", (tx_id, chat_id))
+    affected = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return affected
+
+def clear_user_expenses(chat_id: int) -> int:
+    """Clear all expenses and income history for a chat."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM expenses WHERE chat_id = ?", (chat_id,))
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+# -------------------------------------------------------------
+# Group Settings & Anti-Spam Operations
+# -------------------------------------------------------------
+def is_antispam_enabled(chat_id: int) -> bool:
+    """Check if anti-spam is enabled for a group."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT antispam_enabled FROM group_settings WHERE chat_id = ?", (chat_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row is not None:
+        return bool(row[0])
+    return True  # Enabled by default
+
+def set_antispam_enabled(chat_id: int, enabled: bool) -> bool:
+    """Enable or disable anti-spam for a group."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    now_str = datetime.utcnow().isoformat()
+    val = 1 if enabled else 0
+    cursor.execute("""
+        INSERT INTO group_settings (chat_id, antispam_enabled, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(chat_id) DO UPDATE SET
+            antispam_enabled = excluded.antispam_enabled,
+            updated_at = excluded.updated_at
+    """, (chat_id, val, now_str))
+    conn.commit()
+    conn.close()
+    return True
+

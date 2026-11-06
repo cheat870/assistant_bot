@@ -13,8 +13,14 @@ from services.video_downloader import (
     download_thumbnail_hd,
     cleanup_file,
 )
-from database import log_download, is_ai_mode
+from database import log_download, is_ai_mode, is_antispam_enabled
 from services.ai_service import query_continuous_ai
+from services.moderation_service import check_spam
+from services.expense_service import (
+    parse_expense_text,
+    record_transaction,
+    format_record_success,
+)
 from handlers.command_handlers import (
     get_main_menu_keyboard,
     start_command,
@@ -23,6 +29,9 @@ from handlers.command_handlers import (
     finance_command,
     reminders_command,
     aimode_command,
+    budget_command,
+    news_command,
+    safe_reply_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,9 +64,32 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
         
     chat = update.effective_chat
 
-    # Quick routing for persistent bottom keyboard buttons
+    # 1. Anti-Spam protection for Group & Supergroup
+    if chat.type in ["group", "supergroup"] and is_antispam_enabled(chat.id):
+        is_spam, reason = check_spam(text)
+        if is_spam:
+            try:
+                await update.message.delete()
+                warn_msg = await context.bot.send_message(
+                    chat_id=chat.id,
+                    text=f"🛡️ *[Auto-Mod]* បានលុបសារផ្សាយពាណិជ្ជកម្ម/Spam ដោយស្វ័យប្រវត្តិ ({reason})។",
+                    parse_mode="Markdown"
+                )
+                await asyncio.sleep(5)
+                await warn_msg.delete()
+            except Exception as e:
+                logger.warning(f"Failed to auto-delete spam: {e}")
+            return
+
+    # 2. Quick routing for persistent bottom keyboard buttons
     if text == "🏠 ផ្ទាំង Menu មេ":
         await start_command(update, context)
+        return
+    elif text == "📊 ចំណូល-ចំណាយ":
+        await budget_command(update, context)
+        return
+    elif text == "📰 ព័ត៌មានពេលព្រឹក":
+        await news_command(update, context)
         return
     elif text == "🌤️ អាកាសធាតុ":
         await weather_command(update, context)
@@ -83,6 +115,14 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
             "4. Bot នឹងទាញយកវីដេអូ និងមានជម្រើសសម្រាប់ទាញយក MP3 ឬ Cover HD ដោយស្វ័យប្រវត្ត!"
         )
         await update.message.reply_text(help_msg, parse_mode="Markdown")
+        return
+
+    # 3. Check for natural language expense & income tracking (e.g. ចាយ 20,000៛ ញ៉ាំបាយ, ចំណាយ 5$ coffee)
+    parsed_expense = parse_expense_text(text)
+    if parsed_expense:
+        record_transaction(chat.id, parsed_expense)
+        msg = format_record_success(parsed_expense)
+        await safe_reply_text(update.message, msg)
         return
 
     url = extract_video_url(text)

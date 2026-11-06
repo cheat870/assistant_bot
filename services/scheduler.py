@@ -20,6 +20,7 @@ from database import (
 )
 from services.holiday_calendar import get_today_holiday, format_alert_message
 from services.weather_service import fetch_weather, format_weather_message
+from services.news_service import generate_morning_news_digest
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,28 @@ async def daily_weather_job(context):
     logger.info("Executing scheduled 5:00 AM Cambodia daily weather alert...")
     await send_daily_weather_to_subscribers(context.application)
 
+async def daily_news_job(context):
+    """JobQueue callback function executed daily at 7:00 AM to send morning news digest."""
+    logger.info("Executing scheduled 7:00 AM Cambodia morning news digest...")
+    subscribers = get_active_subscribers()
+    if not subscribers:
+        logger.info("No subscribers found for morning news digest.")
+        return
+    news_text = await generate_morning_news_digest()
+    sent_count = 0
+    for chat_id in subscribers:
+        try:
+            await context.application.bot.send_message(
+                chat_id=chat_id,
+                text=news_text,
+                parse_mode="Markdown"
+            )
+            sent_count += 1
+            await asyncio.sleep(0.05)
+        except Exception as e:
+            logger.warning(f"Failed to send morning news digest to {chat_id}: {e}")
+    logger.info(f"7:00 AM Morning news digest sent to {sent_count}/{len(subscribers)} subscribers.")
+
 async def check_reminders_job(context):
     """JobQueue callback executed every 60 seconds to fire due reminders."""
     now_iso = datetime.utcnow().isoformat()
@@ -132,7 +155,7 @@ async def check_reminders_job(context):
             logger.warning(f"Failed to deliver reminder {rem['id']}: {e}")
 
 def setup_scheduler(app: Application):
-    """Set up the daily 4:00 AM holiday, 5:00 AM weather alerts, and reminders checker."""
+    """Set up the daily 4:00 AM holiday, 5:00 AM weather alerts, 7:00 AM news, and reminders checker."""
     job_queue = app.job_queue
     if not job_queue:
         logger.warning("JobQueue is not enabled in Application.")
@@ -156,7 +179,16 @@ def setup_scheduler(app: Application):
     )
     logger.info(f"Registered daily 5:00 AM weather alert at {weather_alert_time} ({BOT_TIMEZONE}).")
 
-    # 3. Custom Reminders: Check every 60 seconds
+    # 3. Daily Morning News Digest: 7:00 AM (Asia/Phnom_Penh)
+    news_alert_time = time(hour=7, minute=0, tzinfo=BOT_TIMEZONE)
+    job_queue.run_daily(
+        daily_news_job,
+        time=news_alert_time,
+        name="daily_cambodia_morning_news"
+    )
+    logger.info(f"Registered daily 7:00 AM morning news digest at {news_alert_time} ({BOT_TIMEZONE}).")
+
+    # 4. Custom Reminders: Check every 60 seconds
     job_queue.run_repeating(
         check_reminders_job,
         interval=60,

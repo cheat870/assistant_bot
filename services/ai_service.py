@@ -21,6 +21,8 @@ DEFAULT_CANDIDATES = [
     "gemini-3.8-flash",
     "gemini-3.5-flash",
     "gemini-3.1-flash-lite",
+    "gemini-flash-latest",
+    "gemini-flash-lite-latest",
     "gemini-2.5-flash",
     "gemini-2.0-flash",
     "gemini-1.5-flash",
@@ -95,6 +97,7 @@ def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT):
             is_skippable = any(k in err_msg for k in [
                 "404", "not found", "not available", "not supported",
                 "429", "quota", "resource_exhausted", "exceeded your current quota",
+                "503", "unavailable", "high demand",
                 "400", "invalid_argument", "streaming", "bidirectional", "live-preview", "live"
             ])
             if is_skippable:
