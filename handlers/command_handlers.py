@@ -30,6 +30,11 @@ from database import (
     is_antispam_enabled,
     set_antispam_enabled,
     clear_user_expenses,
+    is_welcome_enabled,
+    set_welcome_enabled,
+    save_pdf_session,
+    get_pdf_session,
+    clear_pdf_session,
 )
 from services.holiday_calendar import (
     format_upcoming_message,
@@ -68,6 +73,10 @@ from services.linguistics_service import check_khmer_spelling, translate_pro
 from services.music_service import download_song, identify_tiktok_sound
 from services.image_service import remove_background
 from services.news_service import generate_morning_news_digest
+from services.pdf_service import analyze_and_summarize_pdf, answer_pdf_question
+from services.image_enhancer_service import enhance_image
+from services.watermark_service import apply_watermark
+from services.welcome_banner_service import generate_welcome_banner
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +143,11 @@ def get_welcome_text(user_first_name: str) -> str:
         "💰 *៨. សេដ្ឋកិច្ចកម្ពុជា:* អត្រាប្តូរប្រាក់ NBC/USD/KHR, តម្លៃមាស, តម្លៃប្រេងឥន្ធនៈ (`/finance`)\n"
         "📰 *៩. ព័ត៌មានពេលព្រឹក ៧:០០ AM:* សេចក្តីសង្ខេបព័ត៌មានជាតិ & បច្ចេកវិទ្យា (`/news`)\n"
         "🛡️ *១០. ការពារ Group Telegram:* ទប់ស្កាត់ Spam, Casino Ads & Bot ក្លែងក្លាយ (`/antispam`)\n"
-        "🔔 *១១. សារដាស់តឿន & អាកាសធាតុ:* `/remind` និងដំណឹងអាកាសធាតុ ៥:០០ ព្រឹកស្វ័យប្រវត្ត\n\n"
+        "🔔 *១១. សារដាស់តឿន & អាកាសធាតុ:* `/remind` និងដំណឹងអាកាសធាតុ ៥:០០ ព្រឹកស្វ័យប្រវត្ត\n"
+        "📄 *១២. Chat with PDF:* ផ្ញើ File PDF មកកាន់ Bot នឹងអាន & សង្ខេបចំណុចសំខាន់ៗភ្លាមៗ (`/pdf`)\n"
+        "🔍 *១៣. ធ្វើឱ្យច្បាស់ HD:* វាយ `/enhance` លើរូបភាពដើម្បីសម្អាត Noise & Super-Resolution\n"
+        "💧 *១៤. ដាក់ Watermark:* វាយ `/watermark <ឈ្មោះហាង>` បោះត្រាការពាររូបភាពទំនិញ\n"
+        "🖼️ *១៥. Banner ស្វាគមន៍:* បង្កើតរូបភាពស្វាគមន៍សមាជិកថ្មីក្នុង Group ស្វ័យប្រវត្ត (`/welcome on|off`)\n\n"
         "👇 _សូមចុចជ្រើសរើស Menu ខាងក្រោម៖_"
     )
 
@@ -172,6 +185,10 @@ def get_main_menu_keyboard(chat_id: int) -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(ai_btn_text, callback_data="btn_toggle_aimode"),
             InlineKeyboardButton("⏰ សារដាស់តឿន (Reminders)", callback_data="btn_reminders"),
+        ],
+        [
+            InlineKeyboardButton("📄 Chat with PDF (/pdf)", callback_data="btn_pdf_help"),
+            InlineKeyboardButton("🔍 ធ្វើឱ្យច្បាស់ HD (/enhance)", callback_data="btn_photo_enhance_help"),
         ],
         [
             InlineKeyboardButton("🛠️ ឧបករណ៍ QR / KHQR", callback_data="btn_tools_menu"),
@@ -837,6 +854,282 @@ async def antispam_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
 
+# -------------------------------------------------------------
+# Welcome Banner Control Handler
+# -------------------------------------------------------------
+async def welcome_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle Auto Welcome Banner in Telegram groups: /welcome [on|off]."""
+    chat = update.effective_chat
+    user = update.effective_user
+
+    if chat.type not in ["group", "supergroup"]:
+        await update.message.reply_text("⚠️ *មុខងារនេះដំណើរការតែនៅក្នុង Group ឬ Supergroup ប៉ុណ្ណោះ!*", parse_mode="Markdown")
+        return
+
+    try:
+        member = await context.bot.get_chat_member(chat.id, user.id)
+        if member.status not in ["creator", "administrator"] and user.id != ADMIN_USER_ID:
+            await update.message.reply_text("⛔ *មានតែ Admin នៃ Group ប៉ុណ្ណោះដែលអាចកំណត់ Welcome Banner បាន!*", parse_mode="Markdown")
+            return
+    except Exception as e:
+        logger.warning(f"Failed to check member status: {e}")
+
+    arg = (context.args[0] if context.args else "").lower()
+    if arg in ["on", "enable", "បើក"]:
+        set_welcome_enabled(chat.id, True)
+        await update.message.reply_text(
+            "🖼️ *រូបភាពស្វាគមន៍សមាជិកថ្មី (Welcome Banner) ត្រូវបាន [បើក] ជោគជ័យ!* ✅\n\n"
+            "Bot នឹងបង្កើតរូបភាព Welcome Banner ស្អាតៗ ដោយមាន Profile Picture និងឈ្មោះសមាជិកថ្មីដោយស្វ័យប្រវត្តិ។",
+            parse_mode="Markdown"
+        )
+    elif arg in ["off", "disable", "បិទ"]:
+        set_welcome_enabled(chat.id, False)
+        await update.message.reply_text(
+            "⚠️ *រូបភាពស្វាគមន៍សមាជិកថ្មី (Welcome Banner) ត្រូវបាន [បិទ]!*",
+            parse_mode="Markdown"
+        )
+    else:
+        current_status = is_welcome_enabled(chat.id)
+        status_str = "✅ កំពុងបើក (Active)" if current_status else "❌ បានបិទ (Disabled)"
+        await update.message.reply_text(
+            f"🖼️ *ការកំណត់ Welcome Banner ក្នុង Group៖*\n\n"
+            f"• ស្ថានភាពបច្ចុប្បន្ន៖ *{status_str}*\n\n"
+            f"👉 របៀបកំណត់៖\n"
+            f"• `/welcome on` ➔ ដើម្បីបើក\n"
+            f"• `/welcome off` ➔ ដើម្បីបិទ",
+            parse_mode="Markdown"
+        )
+
+# -------------------------------------------------------------
+# New Chat Members Auto-Welcome Handler
+# -------------------------------------------------------------
+async def handle_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate and send custom high-definition welcome banner for new group members."""
+    chat = update.effective_chat
+    if not update.message or not update.message.new_chat_members:
+        return
+
+    if not is_welcome_enabled(chat.id):
+        return
+
+    import io
+    for new_member in update.message.new_chat_members:
+        if new_member.is_bot:
+            continue
+
+        try:
+            # Try fetching user avatar
+            avatar_bytes = None
+            photos = await context.bot.get_user_profile_photos(new_member.id, limit=1)
+            if photos and photos.total_count > 0:
+                photo_file = await context.bot.get_file(photos.photos[0][-1].file_id)
+                avatar_bytes = bytes(await photo_file.download_as_bytearray())
+
+            # Member count
+            count = None
+            try:
+                count = await context.bot.get_chat_member_count(chat.id)
+            except Exception:
+                pass
+
+            banner_bytes = generate_welcome_banner(
+                user_name=new_member.full_name or "New Member",
+                group_title=chat.title or "Our Group",
+                avatar_bytes=avatar_bytes,
+                member_count=count
+            )
+
+            caption = (
+                f"🎉 *សូមស្វាគមន៍មកកាន់ {chat.title}!* 🤝\n\n"
+                f"👋 សួស្តី [{new_member.full_name}](tg://user?id={new_member.id})! រីករាយដែលបានចូលរួមជាមួយពួកយើង។\n"
+                f"✨ សូមរីករាយ និងគោរពតាមបទបញ្ជាផ្ទៃក្នុងរបស់គ្រុបណា៎! 🙌"
+            )
+
+            await update.message.reply_photo(
+                photo=io.BytesIO(banner_bytes),
+                caption=caption,
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"Error sending welcome banner: {e}")
+
+# -------------------------------------------------------------
+# Chat with PDF & PDF Summarizer Handlers
+# -------------------------------------------------------------
+async def pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """View PDF helper or ask question about active PDF session: /pdf [question]."""
+    chat_id = update.effective_chat.id
+    
+    # Check if this command is replying to a PDF document
+    reply_msg = update.message.reply_to_message
+    if reply_msg and reply_msg.document:
+        doc = reply_msg.document
+        if (doc.mime_type and "pdf" in doc.mime_type.lower()) or (doc.file_name and doc.file_name.lower().endswith(".pdf")):
+            fake_update = Update(update.update_id, message=reply_msg)
+            await handle_pdf_document(fake_update, context)
+            return
+
+    # Check if user asked a question about active PDF session
+    question = " ".join(context.args).strip() if context.args else ""
+    if question:
+        session = get_pdf_session(chat_id)
+        if session:
+            await update.message.chat.send_action("typing")
+            status = await update.message.reply_text(f"🔍 *កំពុងស្វែងរកចម្លើយក្នុងឯកសារ '{session['filename']}'...*", parse_mode="Markdown")
+            ans = await answer_pdf_question(session.get("extracted_text") or session.get("summary", ""), question, session.get("filename", ""))
+            await safe_edit_text(status, ans)
+            return
+        else:
+            await update.message.reply_text(
+                "⚠️ *មិនទាន់មានឯកសារ PDF ណាមួយត្រូវបាន Upload ទេ!*\n\n"
+                "👉 សូមផ្ញើ ឬ Forward File PDF ចូលមកកាន់ Bot ជាមុនសិនណា៎។",
+                parse_mode="Markdown"
+            )
+            return
+
+    # Help message
+    help_msg = (
+        "📄 *ជំនួយការឯកសារ PDF & Chat with PDF (/pdf)* 🇰🇭\n\n"
+        "👉 *របៀបប្រើប្រាស់ងាយៗ៖*\n"
+        "1. **ផ្ញើ ឬ Forward File PDF ចូលមកកាន់ Bot** (កិច្ចសន្យា, សៀវភៅ, មេរៀន, ឬរបាយការណ៍)\n"
+        "2. Bot នឹងអាន និងសង្ខេបចំណុចសំខាន់ៗជាភាសាខ្មែរភ្លាមៗ\n"
+        "3. បន្ទាប់មក បងអាច **Reply លើសារសង្ខេប** ឬវាយ `/pdf <សំណួរ>` ដើម្បីសួរលម្អិតពីទំព័រណាមួយបាន!\n\n"
+        "💡 _គាំទ្រឯកសារ PDF រហូតដល់ 20 MB យ៉ាងរលូន។_"
+    )
+    await safe_reply_text(update.message, help_msg)
+
+async def handle_pdf_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle uploaded or forwarded PDF document: summarize and start Q&A session."""
+    doc = update.message.document
+    if not doc:
+        return
+
+    is_pdf = (doc.mime_type and "pdf" in doc.mime_type.lower()) or (doc.file_name and doc.file_name.lower().endswith(".pdf"))
+    if not is_pdf:
+        return
+
+    if doc.file_size and doc.file_size > 25 * 1024 * 1024:
+        await update.message.reply_text("⚠️ *ទំហំ File PDF លើសពី 25 MB!* សូមផ្ញើ file ដែលមានទំហំតូចជាងនេះ។", parse_mode="Markdown")
+        return
+
+    chat_id = update.effective_chat.id
+    filename = doc.file_name or "document.pdf"
+    await update.message.chat.send_action("typing")
+    status_msg = await update.message.reply_text(f"📄 *AI កំពុងអាន និងសង្ខេបឯកសារ '{filename}'...* ⏳", parse_mode="Markdown")
+
+    try:
+        tg_file = await context.bot.get_file(doc.file_id)
+        pdf_bytes = bytes(await tg_file.download_as_bytearray())
+        summary, pdf_info = await analyze_and_summarize_pdf(pdf_bytes, filename)
+        
+        # Save session for follow-up chat
+        save_pdf_session(
+            chat_id=chat_id,
+            filename=filename,
+            summary=summary,
+            extracted_text=pdf_info.get("text", ""),
+            total_pages=pdf_info.get("total_pages", 1)
+        )
+
+        await safe_edit_text(status_msg, summary)
+    except Exception as e:
+        logger.error(f"Error analyzing PDF document: {e}")
+        await safe_edit_text(status_msg, f"❌ កំហុសក្នុងការអាន PDF៖ {str(e)[:140]}")
+
+# -------------------------------------------------------------
+# AI Image Upscaler & Enhancer Handler
+# -------------------------------------------------------------
+async def enhance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Upscale and enhance image to crystal clear HD quality: /enhance or /upscale."""
+    import io
+    target_msg = update.message.reply_to_message if update.message.reply_to_message else update.message
+    photos = target_msg.photo if target_msg else None
+
+    if not photos:
+        await update.message.reply_text(
+            "🔍 *របៀបប្រើប្រាស់ AI Image Enhancer (ធ្វើឱ្យរូបច្បាស់ HD)៖*\n\n"
+            "👉 ផ្ញើរូបភាពដោយភ្ជាប់ពាក្យ `/enhance` ក្នុង Caption\n"
+            "👉 ឬចុច **Reply** លើរូបភាពណាមួយ រួចវាយពាក្យ `/enhance` ឬ `/upscale`\n\n"
+            "Bot នឹងជួយសម្អាត Noise, ពង្រីកទំហំ 2x-4x និងធ្វើឱ្យរូបភាពកាន់តែច្បាស់ភ្លាមៗ! ✨",
+            parse_mode="Markdown"
+        )
+        return
+
+    photo = photos[-1]
+    await update.message.chat.send_action("upload_photo")
+    status = await update.message.reply_text("🔍 *កំពុងសម្អាត Noise និងបង្កើនគុណភាពរូបភាព HD...* ⏳", parse_mode="Markdown")
+
+    try:
+        tg_file = await context.bot.get_file(photo.file_id)
+        img_bytes = bytes(await tg_file.download_as_bytearray())
+        enhanced_bytes, metrics = enhance_image(img_bytes)
+
+        caption = (
+            f"✨ *រូបភាពរបស់អ្នកត្រូវបានបង្កើនគុណភាព HD រួចរាល់!* 🔍\n\n"
+            f"📐 *ទំហំដើម:* `{metrics['orig_width']} x {metrics['orig_height']}` px\n"
+            f"📈 *ទំហំថ្មី (HD):* `{metrics['new_width']} x {metrics['new_height']}` px (+{metrics['scale']}x)\n"
+            f"⚡ *រយៈពេលដំណើរការ:* `{metrics['elapsed_seconds']}s`"
+        )
+
+        await update.message.reply_photo(
+            photo=io.BytesIO(enhanced_bytes),
+            caption=caption,
+            parse_mode="Markdown"
+        )
+        try:
+            await status.delete()
+        except Exception:
+            pass
+    except Exception as e:
+        logger.error(f"Image enhancement error: {e}")
+        await safe_edit_text(status, f"❌ មិនអាចបង្កើនគុណភាពរូបភាពបានទេ៖ {str(e)[:120]}")
+
+# -------------------------------------------------------------
+# Watermark & Brand Protection Handler
+# -------------------------------------------------------------
+async def watermark_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add professional watermark to image: /watermark <text>."""
+    import io
+    watermark_text = " ".join(context.args).strip() if context.args else ""
+    target_msg = update.message.reply_to_message if update.message.reply_to_message else update.message
+    photos = target_msg.photo if target_msg else None
+
+    if not photos:
+        await update.message.reply_text(
+            "💧 *របៀបប្រើប្រាស់ Watermark បោះត្រាការពាររូបភាពទំនិញ៖*\n\n"
+            "👉 ផ្ញើរូបភាពដោយភ្ជាប់ពាក្យ `/watermark <ឈ្មោះហាង លេខទូរស័ព្ទ>` ក្នុង Caption\n"
+            "👉 ឬចុច **Reply** លើរូបភាពណាមួយ រួចវាយ `/watermark <ឈ្មោះហាង លេខទូរស័ព្ទ>`\n\n"
+            "ឧទាហរណ៍៖ `/watermark ហាង ពិសិដ្ឋ 012 345 678`\n"
+            "Bot នឹងបោះត្រាការពាររូបភាពកម្រិត Professional ជូនភ្លាមៗ! 🛡️",
+            parse_mode="Markdown"
+        )
+        return
+
+    if not watermark_text:
+        watermark_text = update.effective_user.first_name or "My Store"
+
+    photo = photos[-1]
+    await update.message.chat.send_action("upload_photo")
+    status = await update.message.reply_text(f"💧 *កំពុងបោះត្រា Watermark '{watermark_text}' លើរូបភាព...* ⏳", parse_mode="Markdown")
+
+    try:
+        tg_file = await context.bot.get_file(photo.file_id)
+        img_bytes = bytes(await tg_file.download_as_bytearray())
+        watermarked_bytes = apply_watermark(img_bytes, text=watermark_text)
+
+        await update.message.reply_photo(
+            photo=io.BytesIO(watermarked_bytes),
+            caption=f"🛡️ *រូបភាពរបស់អ្នកត្រូវបានបោះត្រាការពារដោយជោគជ័យ!* ✨\n_Watermark: {watermark_text}_",
+            parse_mode="Markdown"
+        )
+        try:
+            await status.delete()
+        except Exception:
+            pass
+    except Exception as e:
+        logger.error(f"Watermark error: {e}")
+        await safe_edit_text(status, f"❌ មិនអាចបោះត្រាលើរូបភាពបានទេ៖ {str(e)[:120]}")
+
 
 # -------------------------------------------------------------
 # Safe Message Sender & Editor (Protects against Markdown parse errors)
@@ -899,8 +1192,45 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
         tg_file = await context.bot.get_file(photo.file_id)
         img_bytes = bytes(await tg_file.download_as_bytearray())
         
-        # Check if caption requests background removal
+        # Check if caption requests image enhancement (HD Upscaler)
         caption_lower = caption.lower()
+        if "/enhance" in caption_lower or "/upscale" in caption_lower or "ច្បាស់" in caption_lower:
+            status = await update.message.reply_text("🔍 *កំពុងសម្អាត Noise និងបង្កើនគុណភាពរូបភាព HD...* ⏳", parse_mode="Markdown")
+            import io
+            enhanced_bytes, metrics = enhance_image(img_bytes)
+            caption_out = (
+                f"✨ *រូបភាពរបស់អ្នកត្រូវបានបង្កើនគុណភាព HD រួចរាល់!* 🔍\n\n"
+                f"📐 *ទំហំដើម:* `{metrics['orig_width']} x {metrics['orig_height']}` px\n"
+                f"📈 *ទំហំថ្មី (HD):* `{metrics['new_width']} x {metrics['new_height']}` px (+{metrics['scale']}x)\n"
+                f"⚡ *រយៈពេលដំណើរការ:* `{metrics['elapsed_seconds']}s`"
+            )
+            await update.message.reply_photo(photo=io.BytesIO(enhanced_bytes), caption=caption_out, parse_mode="Markdown")
+            try:
+                await status.delete()
+            except Exception:
+                pass
+            return
+
+        # Check if caption requests watermark
+        if "/watermark" in caption_lower or "watermark" in caption_lower or "បោះត្រា" in caption_lower:
+            status = await update.message.reply_text("💧 *កំពុងបោះត្រា Watermark លើរូបភាព...* ⏳", parse_mode="Markdown")
+            import io
+            clean_wm = caption.replace("/watermark", "").replace("watermark", "").replace("បោះត្រា", "").strip()
+            if not clean_wm:
+                clean_wm = update.effective_user.first_name or "My Store"
+            watermarked_bytes = apply_watermark(img_bytes, text=clean_wm)
+            await update.message.reply_photo(
+                photo=io.BytesIO(watermarked_bytes),
+                caption=f"🛡️ *រូបភាពរបស់អ្នកត្រូវបានបោះត្រាការពារដោយជោគជ័យ!* ✨\n_Watermark: {clean_wm}_",
+                parse_mode="Markdown"
+            )
+            try:
+                await status.delete()
+            except Exception:
+                pass
+            return
+
+        # Check if caption requests background removal
         if "/rembg" in caption_lower or "កាត់" in caption_lower or "background" in caption_lower:
             status = await update.message.reply_text("✂️ *កំពុងកាត់ផ្ទៃខាងក្រោយរូបភាព (Background Remover)...*", parse_mode="Markdown")
             await update.message.chat.send_action("upload_document")
@@ -941,7 +1271,17 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
         # 2. Otherwise process with Gemini Vision OCR / AI
         status = await update.message.reply_text("📷 *AI កំពុងអាន និងវិភាគរូបភាពរបស់អ្នក...* 🔍", parse_mode="Markdown")
         reply_text = await process_vision_ai(img_bytes, mime_type="image/jpeg", caption=caption)
-        await safe_edit_text(status, reply_text)
+        photo_action_kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🔍 ធ្វើឱ្យច្បាស់ HD", callback_data="btn_photo_enhance_help"),
+                InlineKeyboardButton("💧 ដាក់ Watermark", callback_data="btn_photo_watermark_help"),
+            ],
+            [
+                InlineKeyboardButton("✂️ កាត់ Background", callback_data="btn_photo_rembg_help"),
+                InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main"),
+            ]
+        ])
+        await safe_edit_text(status, reply_text, reply_markup=photo_action_kb)
         
     except Exception as e:
         logger.error(f"Error handling photo: {e}")
@@ -1529,6 +1869,46 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             )
             await query.edit_message_text(help_msg, reply_markup=get_back_keyboard(), parse_mode="Markdown")
             
+        elif data == "btn_photo_enhance_help":
+            await query.answer()
+            msg = (
+                "🔍 *របៀបធ្វើឱ្យរូបភាពកាន់តែច្បាស់ (AI Image Enhancer)៖*\n\n"
+                "👉 ចុច **Reply** លើរូបភាពណាមួយ រួចវាយ `/enhance` ឬ `/upscale`\n"
+                "👉 ឬផ្ញើរូបភាពថ្មីដោយដាក់ Caption ថា `/enhance`\n\n"
+                "Bot នឹងជួយសម្អាត Noise, ពង្រីកទំហំ 2x-4x និងធ្វើឱ្យរូបភាពកាន់តែច្បាស់ភ្លាមៗ! ✨"
+            )
+            await query.message.reply_text(msg, parse_mode="Markdown")
+
+        elif data == "btn_photo_watermark_help":
+            await query.answer()
+            msg = (
+                "💧 *របៀបបោះត្រា Watermark ការពាររូបភាពផលិតផល៖*\n\n"
+                "👉 ចុច **Reply** លើរូបភាពណាមួយ រួចវាយ `/watermark <ឈ្មោះហាង លេខទូរស័ព្ទ>`\n"
+                "👉 ឧទាហរណ៍៖ `/watermark ហាង ពិសិដ្ឋ 012 345 678`\n\n"
+                "Bot នឹងបោះត្រាស្អាតៗកម្រិត Professional ការពារគេលួចចម្លងរូបភាព! 🛡️"
+            )
+            await query.message.reply_text(msg, parse_mode="Markdown")
+
+        elif data == "btn_photo_rembg_help":
+            await query.answer()
+            msg = (
+                "✂️ *របៀបកាត់ផ្ទៃខាងក្រោយរូបភាព (AI Background Remover)៖*\n\n"
+                "👉 ចុច **Reply** លើរូបភាពណាមួយ រួចវាយ `/rembg`\n"
+                "Bot នឹងកាត់ចេញ background ក្លាយជា Transparent PNG ក្នុងរយៈពេល ៣ វិនាទី!"
+            )
+            await query.message.reply_text(msg, parse_mode="Markdown")
+
+        elif data == "btn_pdf_help":
+            await query.answer()
+            msg = (
+                "📄 *ជំនួយការឯកសារ PDF & Chat with PDF (/pdf)* 🇰🇭\n\n"
+                "👉 *របៀបប្រើប្រាស់ងាយៗ៖*\n"
+                "1. **ផ្ញើ ឬ Forward File PDF ចូលមកកាន់ Bot** (កិច្ចសន្យា, សៀវភៅ, មេរៀន, ឬរបាយការណ៍)\n"
+                "2. Bot នឹងអាន និងសង្ខេបចំណុចសំខាន់ៗជាភាសាខ្មែរភ្លាមៗ\n"
+                "3. បន្ទាប់មក បងអាច **Reply លើសារសង្ខេប** ឬវាយ `/pdf <សំណួរ>` ដើម្បីសួរលម្អិតពីទំព័រណាមួយបាន!"
+            )
+            await query.edit_message_text(msg, reply_markup=get_back_keyboard(), parse_mode="Markdown")
+
         elif data == "btn_back_main":
             await query.answer()
             first_name = user.first_name if user else "លោកអ្នក"

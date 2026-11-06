@@ -192,6 +192,94 @@ async def test_news_service_async():
     print(f"  - Cambodia headlines: {len(headlines['cambodia'])}, Tech headlines: {len(headlines['tech'])}")
     print("  [OK] News Service verified!")
 
+def test_pdf_service():
+    print("\n[9] Testing PDF Extraction & Session Service...")
+    import pypdf
+    from services.pdf_service import extract_pdf_info_and_text
+    from database import save_pdf_session, get_pdf_session, clear_pdf_session
+    
+    # Create test in-memory PDF
+    writer = pypdf.PdfWriter()
+    writer.add_blank_page(width=300, height=300)
+    buf = io.BytesIO()
+    writer.write(buf)
+    pdf_bytes = buf.getvalue()
+    
+    info = extract_pdf_info_and_text(pdf_bytes)
+    assert info["success"] is True
+    assert info["total_pages"] == 1
+    print(f"  - In-memory PDF created and extracted: {info['total_pages']} page(s)")
+    
+    # Test session storage
+    test_chat = 99887766
+    save_pdf_session(test_chat, "test_contract.pdf", "Summary of contract", "Page 1 content", 1)
+    sess = get_pdf_session(test_chat)
+    assert sess is not None
+    assert sess["filename"] == "test_contract.pdf"
+    clear_pdf_session(test_chat)
+    assert get_pdf_session(test_chat) is None
+    print("  [OK] PDF Service and session storage verified!")
+
+def test_image_enhancer():
+    print("\n[10] Testing Image Enhancer & Super-Resolution...")
+    import numpy as np
+    import cv2
+    from services.image_enhancer_service import enhance_image
+    
+    # Create dummy 120x120 test image
+    dummy = np.zeros((120, 120, 3), dtype=np.uint8)
+    dummy[:60, :] = [220, 100, 50]
+    dummy[60:, :] = [50, 150, 220]
+    cv2.putText(dummy, "HD", (30, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 2)
+    _, buf = cv2.imencode(".jpg", dummy)
+    raw_bytes = buf.tobytes()
+    
+    enhanced_bytes, metrics = enhance_image(raw_bytes, target_scale=2)
+    assert len(enhanced_bytes) > 0
+    assert metrics["new_width"] > metrics["orig_width"]
+    print(f"  - Enhanced: {metrics['orig_width']}x{metrics['orig_height']} -> {metrics['new_width']}x{metrics['new_height']} (Scale: {metrics['scale']}x, Time: {metrics['elapsed_seconds']}s)")
+    print("  [OK] Image Enhancer verified!")
+
+def test_watermark_service():
+    print("\n[11] Testing Watermark Service...")
+    from PIL import Image
+    from services.watermark_service import apply_watermark
+    
+    img = Image.new("RGB", (400, 300), color=(80, 120, 160))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG")
+    raw_bytes = buf.getvalue()
+    
+    wm_bytes = apply_watermark(raw_bytes, text="Angkor Store 012 345 678", position="bottom_right")
+    assert len(wm_bytes) > 0
+    print(f"  - Watermarked badge image size: {len(wm_bytes)} bytes")
+    
+    diag_bytes = apply_watermark(raw_bytes, text="CONFIDENTIAL", position="diagonal")
+    assert len(diag_bytes) > 0
+    print(f"  - Diagonal watermark image size: {len(diag_bytes)} bytes")
+    print("  [OK] Watermark Service verified!")
+
+def test_welcome_banner_service():
+    print("\n[12] Testing Custom Welcome Banner Service...")
+    from services.welcome_banner_service import generate_welcome_banner
+    from database import is_welcome_enabled, set_welcome_enabled
+    
+    banner_bytes = generate_welcome_banner(
+        user_name="Socheat Sopheap",
+        group_title="Cambodia Developers Hub",
+        avatar_bytes=None,
+        member_count=1250
+    )
+    assert len(banner_bytes) > 10000
+    print(f"  - Generated welcome banner size: {len(banner_bytes)} bytes")
+    
+    test_group = 88776655
+    set_welcome_enabled(test_group, True)
+    assert is_welcome_enabled(test_group) is True
+    set_welcome_enabled(test_group, False)
+    assert is_welcome_enabled(test_group) is False
+    print("  [OK] Welcome Banner & Group Settings verified!")
+
 if __name__ == "__main__":
     test_holiday_calendar()
     test_database()
@@ -201,4 +289,8 @@ if __name__ == "__main__":
     test_tts_service()
     test_moderation_service()
     asyncio.run(test_news_service_async())
-    print("\n🎉 ALL 8 TEST SUITES PASSED SUCCESSFULLY! ✅")
+    test_pdf_service()
+    test_image_enhancer()
+    test_watermark_service()
+    test_welcome_banner_service()
+    print("\n🎉 ALL 12 TEST SUITES PASSED SUCCESSFULLY! ✅")

@@ -62,6 +62,12 @@ from handlers.command_handlers import (
     sound_command,
     news_command,
     antispam_command,
+    pdf_command,
+    handle_pdf_document,
+    enhance_command,
+    watermark_command,
+    welcome_command,
+    handle_new_chat_members,
     handle_voice_message,
     handle_photo_message,
     handle_location_message,
@@ -84,6 +90,10 @@ async def post_init(application: Application):
         BotCommand("spend", "💸 កត់ត្រាចំណាយ (Log Expense)"),
         BotCommand("income", "💰 កត់ត្រាចំណូល (Log Income)"),
         BotCommand("song", "🎧 ស្វែងរកចម្រៀង MP3 (Music Finder)"),
+        BotCommand("pdf", "📄 Chat with PDF & សង្ខេបឯកសារ"),
+        BotCommand("enhance", "🔍 ធ្វើឱ្យរូបច្បាស់ HD (Super-Res)"),
+        BotCommand("watermark", "💧 ដាក់ Watermark ការពាររូបភាព"),
+        BotCommand("welcome", "🖼️ Banner ស្វាគមន៍សមាជិក Group"),
         BotCommand("speak", "🗣️ អានជាសំឡេង (Text-to-Speech)"),
         BotCommand("check", "✍️ ពិនិត្យអក្ខរាវិរុទ្ធខ្មែរ (Spellchecker)"),
         BotCommand("translate", "🌐 បកប្រែ Pro (English ⬄ Khmer)"),
@@ -182,11 +192,24 @@ def main():
     app.add_handler(CommandHandler("news", news_command))
     app.add_handler(CommandHandler("antispam", antispam_command))
     
+    # Register V4 Pro Upgraded Command Handlers (PDF, Enhancer, Watermark, Welcome)
+    app.add_handler(CommandHandler("pdf", pdf_command))
+    app.add_handler(CommandHandler("enhance", enhance_command))
+    app.add_handler(CommandHandler("upscale", enhance_command))
+    app.add_handler(CommandHandler("watermark", watermark_command))
+    app.add_handler(CommandHandler("welcome", welcome_command))
+    
     # Register Callback Query Handler for Buttons
     app.add_handler(CallbackQueryHandler(button_callback_handler))
 
     # Register Location Handler for GPS Location Sharing
     app.add_handler(MessageHandler(filters.LOCATION, handle_location_message))
+
+    # Register PDF Document Handler (Chat with PDF & Summarizer)
+    app.add_handler(MessageHandler(filters.Document.PDF | filters.Document.MimeType("application/pdf"), handle_pdf_document))
+
+    # Register New Chat Members Handler (Custom Welcome Banner)
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, handle_new_chat_members))
     
     # Register Voice & Audio Handler (Gemini Voice AI)
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice_message))

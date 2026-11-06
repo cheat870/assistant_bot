@@ -126,6 +126,24 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
         await safe_reply_text(update.message, msg)
         return
 
+    # 4. Check if this is a follow-up question replying to a PDF summary
+    reply_msg = update.message.reply_to_message
+    if reply_msg and reply_msg.from_user and reply_msg.from_user.is_bot:
+        from database import get_pdf_session
+        from services.pdf_service import answer_pdf_question
+        pdf_session = get_pdf_session(chat.id)
+        reply_text_raw = reply_msg.text or reply_msg.caption or ""
+        if pdf_session and any(k in reply_text_raw for k in ["📄", "PDF", "ឈ្មោះឯកសារ", "ទំព័រ", "សេចក្តីសង្ខេប"]):
+            await chat.send_action("typing")
+            ans = await answer_pdf_question(
+                document_context=pdf_session.get("extracted_text") or pdf_session.get("summary", ""),
+                question=text,
+                filename=pdf_session.get("filename", "document.pdf")
+            )
+            from handlers.command_handlers import safe_reply_text
+            await safe_reply_text(update.message, ans)
+            return
+
     url = extract_video_url(text)
     
     # If not a URL, check if continuous AI mode is active

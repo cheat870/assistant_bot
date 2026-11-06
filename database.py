@@ -89,12 +89,24 @@ def init_db():
         )
     """)
 
-    # Table for Group Settings (Anti-Spam & Moderation)
+    # Table for Group Settings (Anti-Spam & Moderation & Welcome)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS group_settings (
             chat_id INTEGER PRIMARY KEY,
             antispam_enabled INTEGER DEFAULT 1,
             welcome_enabled INTEGER DEFAULT 1,
+            updated_at TEXT
+        )
+    """)
+
+    # Table for Chat with PDF Sessions
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pdf_sessions (
+            chat_id INTEGER PRIMARY KEY,
+            filename TEXT,
+            summary TEXT,
+            extracted_text TEXT,
+            total_pages INTEGER DEFAULT 1,
             updated_at TEXT
         )
     """)
@@ -542,6 +554,85 @@ def set_antispam_enabled(chat_id: int, enabled: bool) -> bool:
             antispam_enabled = excluded.antispam_enabled,
             updated_at = excluded.updated_at
     """, (chat_id, val, now_str))
+    conn.commit()
+    conn.close()
+    return True
+
+def is_welcome_enabled(chat_id: int) -> bool:
+    """Check if welcome banner is enabled for a group."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT welcome_enabled FROM group_settings WHERE chat_id = ?", (chat_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row is not None and row[0] is not None:
+        return bool(row[0])
+    return True  # Enabled by default
+
+def set_welcome_enabled(chat_id: int, enabled: bool) -> bool:
+    """Enable or disable welcome banner for a group."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    now_str = datetime.utcnow().isoformat()
+    val = 1 if enabled else 0
+    cursor.execute("""
+        INSERT INTO group_settings (chat_id, welcome_enabled, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(chat_id) DO UPDATE SET
+            welcome_enabled = excluded.welcome_enabled,
+            updated_at = excluded.updated_at
+    """, (chat_id, val, now_str))
+    conn.commit()
+    conn.close()
+    return True
+
+# -------------------------------------------------------------
+# Chat with PDF Sessions Operations
+# -------------------------------------------------------------
+def save_pdf_session(chat_id: int, filename: str, summary: str, extracted_text: str, total_pages: int = 1) -> bool:
+    """Save or update an active PDF session for follow-up Q&A."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    now_str = datetime.utcnow().isoformat()
+    cursor.execute("""
+        INSERT INTO pdf_sessions (chat_id, filename, summary, extracted_text, total_pages, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(chat_id) DO UPDATE SET
+            filename = excluded.filename,
+            summary = excluded.summary,
+            extracted_text = excluded.extracted_text,
+            total_pages = excluded.total_pages,
+            updated_at = excluded.updated_at
+    """, (chat_id, filename, summary, extracted_text, total_pages, now_str))
+    conn.commit()
+    conn.close()
+    return True
+
+def get_pdf_session(chat_id: int) -> Optional[Dict[str, Any]]:
+    """Retrieve active PDF session for a chat."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT filename, summary, extracted_text, total_pages, updated_at
+        FROM pdf_sessions WHERE chat_id = ?
+    """, (chat_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {
+        "filename": row[0],
+        "summary": row[1],
+        "extracted_text": row[2],
+        "total_pages": row[3],
+        "updated_at": row[4]
+    }
+
+def clear_pdf_session(chat_id: int) -> bool:
+    """Remove active PDF session."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM pdf_sessions WHERE chat_id = ?", (chat_id,))
     conn.commit()
     conn.close()
     return True
