@@ -954,26 +954,26 @@ async def weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /weather command to check weather immediately."""
     chat_id = update.effective_chat.id
     settings = get_user_weather_settings(chat_id)
-    lat = settings.get("latitude", DEFAULT_LAT)
-    lon = settings.get("longitude", DEFAULT_LON)
-    loc_name = settings.get("location_name", DEFAULT_LOCATION_NAME)
+    lat = settings.get("latitude") or DEFAULT_LAT
+    lon = settings.get("longitude") or DEFAULT_LON
+    loc_name = settings.get("location_name") or DEFAULT_LOCATION_NAME
     
     await update.message.chat.send_action("typing")
     w_data = await fetch_weather(lat, lon)
     if not w_data:
-        await update.message.reply_text("❌ មិនអាចទាញយកព័ត៌មានអាកាសធាតុបានទេ សូមព្យាយាមម្តងទៀត។")
+        await safe_reply_text(update.message, "❌ មិនអាចទាញយកព័ត៌មានអាកាសធាតុបានទេ សូមព្យាយាមម្តងទៀត។")
         return
         
     msg = format_weather_message(w_data, loc_name, is_daily_alert=False)
-    await update.message.reply_text(
+    await safe_reply_text(
+        update.message,
         msg,
         reply_markup=InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("📍 ប្ដូរទីតាំង", callback_data="btn_location_menu"),
                 InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
             ]
-        ]),
-        parse_mode="Markdown"
+        ])
     )
 
 async def location_command(update: Update, context: ContextTypes.DEFAULT_TYPE):

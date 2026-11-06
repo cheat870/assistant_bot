@@ -16,7 +16,7 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "1667275809"))
 
 # AI Keys (Optional for AI Discussion)
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or "AQ.Ab8RN6JOdJTd2NrPJK_kpr5pfAYbinEFHX32jF6iJZeAek3tEA"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 # Timezone (Cambodia)

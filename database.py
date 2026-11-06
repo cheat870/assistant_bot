@@ -177,10 +177,12 @@ def get_user_weather_settings(chat_id: int) -> Dict[str, Any]:
     conn.close()
     
     if row:
+        lat = row[0] if (row[0] is not None and isinstance(row[0], (int, float))) else 11.5564
+        lon = row[1] if (row[1] is not None and isinstance(row[1], (int, float))) else 104.9282
         return {
             "chat_id": chat_id,
-            "latitude": row[0],
-            "longitude": row[1],
+            "latitude": lat,
+            "longitude": lon,
             "location_name": row[2] or "រាជធានីភ្នំពេញ",
             "is_active": bool(row[3])
         }

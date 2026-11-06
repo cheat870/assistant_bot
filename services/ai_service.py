@@ -13,14 +13,15 @@ SYSTEM_PROMPT = (
     "Keep answers concise, helpful, and formatted with emojis."
 )
 
-# Initial default working model recommended by Google for 2026
-_cached_working_model: Optional[str] = "gemini-3.8-flash"
+# Initial default working model (fastest responding verified candidate)
+_cached_working_model: Optional[str] = "gemini-flash-lite-latest"
 
-# Primary candidates in priority order
+# Primary candidates in priority order (fastest & most stable first)
 DEFAULT_CANDIDATES = [
-    "gemini-3.8-flash",
+    "gemini-flash-lite-latest",
     "gemini-3.5-flash",
     "gemini-3.1-flash-lite",
+    "gemini-3.8-flash",
     "gemini-flash-latest",
 ]
 
@@ -30,6 +31,17 @@ def is_valid_generation_model(name: str) -> bool:
     """Check if model name is valid for standard generate_content (excludes streaming/live/embed)."""
     name_lower = name.lower()
     return not any(dis in name_lower for dis in DISALLOWED_SUBSTRINGS)
+
+def is_skippable_gemini_error(err: Exception) -> bool:
+    """Check if error is transient, quota-related, obsolete model, or network failure that can be retried on next model."""
+    err_msg = str(err).lower()
+    return any(k in err_msg for k in [
+        "404", "not found", "not available", "not supported", "no longer available",
+        "429", "quota", "resource_exhausted", "exceeded your current quota",
+        "503", "500", "502", "504", "unavailable", "high demand",
+        "400", "invalid_argument", "streaming", "bidirectional", "live-preview", "live",
+        "timeout", "timed out", "10060", "10053", "10054", "connection", "aborted", "reset", "socket", "network"
+    ])
 
 def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT):
     """Synchronous worker that calls Gemini with automatic dynamic model discovery and fallback."""
@@ -47,9 +59,8 @@ def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT):
                 )
             )
         except Exception as e:
-            err_msg = str(e).lower()
-            if any(k in err_msg for k in ["404", "not found", "not available", "429", "quota", "resource_exhausted", "400"]):
-                logger.warning(f"Cached model {_cached_working_model} failed, resetting cache...")
+            if is_skippable_gemini_error(e):
+                logger.warning(f"Cached model {_cached_working_model} failed ({e}), resetting cache...")
                 _cached_working_model = None
             else:
                 raise e
@@ -63,11 +74,8 @@ def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT):
             name = (m.name or "").replace("models/", "")
             if is_valid_generation_model(name) and "flash" in name.lower():
                 listed.append(name)
-        # Prioritize 3.8-flash as recommended by Google
-        if "gemini-3.8-flash" in listed:
-            listed.remove("gemini-3.8-flash")
-            listed.insert(0, "gemini-3.8-flash")
-        for m in reversed(listed):
+        # Append any new discovered flash models
+        for m in listed:
             if m not in candidates:
                 candidates.append(m)
     except Exception as e:
@@ -89,14 +97,7 @@ def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT):
             logger.info(f"Successfully connected to Gemini model: {model_name}")
             return resp
         except Exception as e:
-            err_msg = str(e).lower()
-            is_skippable = any(k in err_msg for k in [
-                "404", "not found", "not available", "not supported",
-                "429", "quota", "resource_exhausted", "exceeded your current quota",
-                "503", "unavailable", "high demand",
-                "400", "invalid_argument", "streaming", "bidirectional", "live-preview", "live"
-            ])
-            if is_skippable:
+            if is_skippable_gemini_error(e):
                 logger.warning(f"Gemini model {model_name} skipped ({e}), trying next candidate...")
                 last_err = e
                 continue

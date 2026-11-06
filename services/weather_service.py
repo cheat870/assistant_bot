@@ -164,25 +164,93 @@ def format_detailed_location_message(loc_info: Dict[str, Any], weather_text: str
         msg += f"---\n{weather_text}"
     return msg
 
-async def fetch_weather(lat: float = DEFAULT_LAT, lon: float = DEFAULT_LON) -> Optional[Dict[str, Any]]:
-    """Fetch real-time weather and today's forecast from Open-Meteo."""
+def _parse_wttr_fallback(wttr_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert wttr.in JSON structure to match Open-Meteo schema."""
+    cc = wttr_data.get("current_condition", [{}])[0]
+    try:
+        temp = float(cc.get("temp_C", 28.0))
+    except (ValueError, TypeError):
+        temp = 28.0
+    try:
+        feels = float(cc.get("FeelsLikeC", temp))
+    except (ValueError, TypeError):
+        feels = temp
+    try:
+        humidity = int(cc.get("humidity", 75))
+    except (ValueError, TypeError):
+        humidity = 75
+    try:
+        wind_kmh = float(cc.get("windspeedKmph", 10.0))
+    except (ValueError, TypeError):
+        wind_kmh = 10.0
+
+    desc = ""
+    w_desc_list = cc.get("weatherDesc", [])
+    if w_desc_list and isinstance(w_desc_list, list):
+        desc = (w_desc_list[0].get("value", "")).lower()
+
+    if "sun" in desc or "clear" in desc:
+        w_code = 1
+    elif "rain" in desc or "shower" in desc:
+        w_code = 61
+    elif "thunder" in desc or "storm" in desc:
+        w_code = 95
+    elif "cloud" in desc or "overcast" in desc:
+        w_code = 3
+    else:
+        w_code = 2
+
+    return {
+        "current": {
+            "temperature_2m": temp,
+            "apparent_temperature": feels,
+            "relative_humidity_2m": humidity,
+            "wind_speed_10m": wind_kmh,
+            "weather_code": w_code,
+        },
+        "daily": {
+            "temperature_2m_max": [round(temp + 4.0, 1)],
+            "temperature_2m_min": [round(temp - 3.0, 1)],
+            "precipitation_probability_max": [50 if "rain" in desc else 20],
+        }
+    }
+
+async def fetch_weather(lat: Optional[float] = None, lon: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    """Fetch real-time weather with Open-Meteo and automatic wttr.in fallback."""
+    # Ensure safe coordinates
+    safe_lat = lat if (lat is not None and isinstance(lat, (int, float))) else DEFAULT_LAT
+    safe_lon = lon if (lon is not None and isinstance(lon, (int, float))) else DEFAULT_LON
+
+    # Primary: Open-Meteo
     url = (
         f"https://api.open-meteo.com/v1/forecast?"
-        f"latitude={lat}&longitude={lon}"
+        f"latitude={safe_lat}&longitude={safe_lon}"
         f"&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m"
         f"&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
         f"&timezone=Asia%2FBangkok"
     )
     for attempt in range(2):
         try:
-            async with httpx.AsyncClient(timeout=10.0, headers=HTTP_HEADERS) as client:
+            async with httpx.AsyncClient(timeout=8.0, headers=HTTP_HEADERS) as client:
                 resp = await client.get(url)
                 if resp.status_code == 200:
                     return resp.json()
                 logger.warning(f"Open-Meteo attempt {attempt + 1} returned status {resp.status_code}")
         except Exception as e:
             logger.warning(f"Open-Meteo attempt {attempt + 1} failed: {e}")
-            
+
+    # Secondary Backup: wttr.in
+    try:
+        url_wttr = f"https://wttr.in/{safe_lat},{safe_lon}?format=j1"
+        wttr_headers = {"User-Agent": "curl/7.88.1"}
+        async with httpx.AsyncClient(timeout=6.0, headers=wttr_headers) as client:
+            resp_wttr = await client.get(url_wttr)
+            if resp_wttr.status_code == 200:
+                logger.info(f"Using wttr.in weather fallback for ({safe_lat}, {safe_lon})")
+                return _parse_wttr_fallback(resp_wttr.json())
+    except Exception as e:
+        logger.warning(f"wttr.in fallback failed: {e}")
+
     return None
 
 def format_weather_message(
