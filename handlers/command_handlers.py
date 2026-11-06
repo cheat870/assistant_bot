@@ -433,11 +433,19 @@ async def qr_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.chat.send_action("upload_photo")
     try:
         bio = generate_qr_code(text)
-        await update.message.reply_photo(
-            photo=bio,
-            caption=f"🔲 *QR Code របស់អ្នកត្រូវបានបង្កើតជោគជ័យ!* ✨\n\n📝 ទិន្នន័យ៖ `{text[:100]}`",
-            parse_mode="Markdown"
-        )
+        caption = f"🔲 *QR Code របស់អ្នកត្រូវបានបង្កើតជោគជ័យ!* ✨\n\n📝 ទិន្នន័យ៖ `{text[:100]}`"
+        try:
+            await update.message.reply_photo(
+                photo=bio,
+                caption=caption,
+                parse_mode="Markdown"
+            )
+        except Exception:
+            bio.seek(0)
+            await update.message.reply_photo(
+                photo=bio,
+                caption=f"🔲 QR Code របស់អ្នកត្រូវបានបង្កើតជោគជ័យ!\n\n📝 ទិន្នន័យ៖ {text[:100]}"
+            )
     except Exception as e:
         logger.error(f"Error generating QR: {e}")
         await update.message.reply_text("❌ មិនអាចបង្កើត QR Code បានទេ។")
@@ -698,6 +706,9 @@ async def song_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await status_msg.delete()
         except Exception:
             pass
+    except asyncio.TimeoutError:
+        logger.warning(f"Song download timed out for query: {query}")
+        await safe_edit_text(status_msg, "❌ ការទាញយកចម្រៀងលើសម៉ោងកំណត់ (Timeout)។ សូមសាកល្បងម្តងទៀត ឬវាយឈ្មោះបទឱ្យកាន់តែច្បាស់។")
     except Exception as e:
         logger.error(f"Song download error: {e}")
         await safe_edit_text(status_msg, f"❌ មិនអាចទាញយកចម្រៀងបានទេ៖ {str(e)[:150]}")
