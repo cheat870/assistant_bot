@@ -452,6 +452,29 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # -------------------------------------------------------------
+# Safe Message Sender & Editor (Protects against Markdown parse errors)
+# -------------------------------------------------------------
+async def safe_reply_text(message, text: str, reply_markup=None, parse_mode="Markdown"):
+    """Safely reply with markdown; fallback to plain text if Telegram fails entity parsing."""
+    try:
+        return await message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except Exception as e:
+        err_str = str(e).lower()
+        if "parse entities" in err_str or "entity" in err_str:
+            return await message.reply_text(text, reply_markup=reply_markup, parse_mode=None)
+        raise
+
+async def safe_edit_text(message, text: str, reply_markup=None, parse_mode="Markdown"):
+    """Safely edit with markdown; fallback to plain text if Telegram fails entity parsing."""
+    try:
+        return await message.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except Exception as e:
+        err_str = str(e).lower()
+        if "parse entities" in err_str or "entity" in err_str:
+            return await message.edit_text(text, reply_markup=reply_markup, parse_mode=None)
+        raise
+
+# -------------------------------------------------------------
 # Media Handlers (Voice & Vision)
 # -------------------------------------------------------------
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -468,10 +491,10 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         voice_bytes = await tg_file.download_as_bytearray()
         
         reply_text = await process_voice_ai(bytes(voice_bytes), mime_type="audio/ogg")
-        await status.edit_text(reply_text, parse_mode="Markdown")
+        await safe_edit_text(status, reply_text)
     except Exception as e:
         logger.error(f"Error handling voice message: {e}")
-        await status.edit_text(f"❌ មិនអាចដំណើរការសារជាសំឡេងបានទេ៖ {str(e)[:100]}")
+        await safe_edit_text(status, f"❌ មិនអាចដំណើរការសារជាសំឡេងបានទេ៖ {str(e)[:100]}")
 
 async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle photo messages for QR reading or Vision OCR."""
@@ -503,21 +526,21 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 f"📝 *ទិន្នន័យ (Decoded Data)៖*\n`{qr_text}`\n\n"
                 "💡 _លោកអ្នកអាច Copy ឬបើកមើល Link នេះបានភ្លាមៗ!_"
             )
-            await update.message.reply_text(
+            await safe_reply_text(
+                update.message,
                 msg,
-                reply_markup=InlineKeyboardMarkup(buttons),
-                parse_mode="Markdown"
+                reply_markup=InlineKeyboardMarkup(buttons)
             )
             return
             
         # 2. Otherwise process with Gemini Vision OCR / AI
         status = await update.message.reply_text("📷 *AI កំពុងអាន និងវិភាគរូបភាពរបស់អ្នក...* 🔍", parse_mode="Markdown")
         reply_text = await process_vision_ai(img_bytes, mime_type="image/jpeg", caption=caption)
-        await status.edit_text(reply_text, parse_mode="Markdown")
+        await safe_edit_text(status, reply_text)
         
     except Exception as e:
         logger.error(f"Error handling photo: {e}")
-        await update.message.reply_text(f"❌ កំហុសក្នុងការដំណើរការរូបភាព៖ {str(e)[:100]}")
+        await safe_reply_text(update.message, f"❌ កំហុសក្នុងការដំណើរការរូបភាព៖ {str(e)[:100]}")
 
 # -------------------------------------------------------------
 # Existing Weather, Calendar & Alert Commands
@@ -730,15 +753,20 @@ async def ask_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /ask command for AI consultation."""
     user_query = " ".join(context.args) if context.args else ""
     if not user_query:
-        await update.message.reply_text(
-            "💡 *របៀបសួរ AI:*\nសូមវាយ `/ask <សំណួររបស់អ្នក>`\n\nឧទាហរណ៍៖ `/ask តើថ្ងៃចូលឆ្នាំខ្មែរមានប្រវត្តិយ៉ាងណា?`",
-            parse_mode="Markdown"
+        await safe_reply_text(
+            update.message,
+            "💡 *របៀបសួរ AI:*\nសូមវាយ `/ask <សំណួររបស់អ្នក>`\n\nឧទាហរណ៍៖ `/ask តើថ្ងៃចូលឆ្នាំខ្មែរមានប្រវត្តិយ៉ាងណា?`"
         )
         return
         
     await update.message.chat.send_action("typing")
-    response_text = await query_ai(user_query)
-    await update.message.reply_text(response_text, parse_mode="Markdown")
+    status = await update.message.reply_text("✨ *AI កំពុងគិត និងស្វែងរកចម្លើយ...* 🤖", parse_mode="Markdown")
+    try:
+        response_text = await query_ai(user_query)
+        await safe_edit_text(status, response_text)
+    except Exception as e:
+        logger.error(f"Error in ask_ai_command: {e}")
+        await safe_edit_text(status, f"❌ AI Error: {str(e)[:120]}")
 
 # -------------------------------------------------------------
 # Callback Query Handler

@@ -95,7 +95,8 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
             exit_button = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔕 បិទ AI Mode", callback_data="btn_toggle_aimode")]
             ])
-            await update.message.reply_text(ai_reply, reply_markup=exit_button, parse_mode="Markdown")
+            from handlers.command_handlers import safe_reply_text
+            await safe_reply_text(update.message, ai_reply, reply_markup=exit_button)
             return
             
         reply_msg = (

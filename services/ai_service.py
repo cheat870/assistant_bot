@@ -52,13 +52,12 @@ async def query_ai(prompt: str) -> str:
             
     return (
         "💡 *មុខងារ AI ពុំទាន់បានកំណត់ API Key នៅឡើយទេ!*\n\n"
-        "ដើម្បីអាចសួរនាំជាមួយ Gemini ឬ ChatGPT សូមដាក់ `GEMINI_API_KEY` ឬ `OPENAI_API_KEY` ទៅក្នុង `.env` ឬ Render Environment Variables នៃ Bot។"
+        "ដើម្បីអាចសួរនាំជាមួយ Gemini ឬ ChatGPT សូមដាក់ `GEMINI_API_KEY` ឬ `OPENAI_API_KEY` ទៅក្នុង Render Environment Variables នៃ Bot។"
     )
 
 async def query_continuous_ai(chat_id: int, user_prompt: str) -> str:
     """Continuous conversation mode with memory of recent messages."""
     if not (GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here"):
-        # Fallback to single query if no Gemini key or using OpenAI
         return await query_ai(user_prompt)
 
     try:
@@ -113,7 +112,7 @@ async def process_voice_ai(voice_bytes: bytes, mime_type: str = "audio/ogg") -> 
     if not (GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here"):
         return (
             "🎙️ *បានទទួលសារជាសំឡេង (Voice Message)!*\n\n"
-            "💡 ដើម្បីឱ្យ Bot អាចស្តាប់យល់ និងឆ្លើយតបជាភាសាខ្មែរ សូមបន្ថែម `GEMINI_API_KEY` ទៅក្នុង `.env` ឬ Render Environment។"
+            "💡 ដើម្បីឱ្យ Bot អាចស្តាប់យល់ និងឆ្លើយតបជាភាសាខ្មែរ សូមបន្ថែម `GEMINI_API_KEY` ទៅក្នុង Render Environment Variables នៃ Bot។"
         )
         
     try:
@@ -148,8 +147,8 @@ async def process_vision_ai(image_bytes: bytes, mime_type: str = "image/jpeg", c
     """Analyze image / OCR / translate / homework solve using Gemini 2.5 Flash."""
     if not (GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here"):
         return (
-            "📷 *បានទទួលរូបភាព! (Vision AI)*\n\n"
-            "💡 ដើម្បីឱ្យ Bot ជួយអានអក្សរ (OCR) បកប្រែ ឬដោះស្រាយលំហាត់ សូមបន្ថែម `GEMINI_API_KEY` ទៅក្នុង `.env` ឬ Render Environment។"
+            "📷 *បានទទួលរូបភាព (Vision AI)!*\n\n"
+            "💡 ដើម្បីឱ្យ Bot ជួយអានអក្សរ OCR បកប្រែ ឬដោះស្រាយលំហាត់ សូមបន្ថែម `GEMINI_API_KEY` ទៅក្នុង Render Environment Variables នៃ Bot។"
         )
         
     try:
