@@ -43,6 +43,8 @@ from services.weather_service import (
     fetch_weather,
     format_weather_message,
     reverse_geocode_async,
+    get_detailed_cambodia_location,
+    format_detailed_location_message,
     DEFAULT_LAT,
     DEFAULT_LON,
     DEFAULT_LOCATION_NAME,
@@ -1013,7 +1015,7 @@ async def test_weather_command(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text(msg, reply_markup=get_back_keyboard(), parse_mode="Markdown")
 
 async def handle_location_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle GPS location sent by user."""
+    """Handle GPS location sent by user with full Cambodian administrative hierarchy."""
     loc = update.message.location
     if not loc:
         return
@@ -1023,26 +1025,20 @@ async def handle_location_message(update: Update, context: ContextTypes.DEFAULT_
     lon = loc.longitude
     
     await chat.send_action("typing")
-    loc_name = await reverse_geocode_async(lat, lon)
+    loc_info = await get_detailed_cambodia_location(lat, lon)
+    loc_short_name = loc_info.get("short_name") or f"{lat:.4f}, {lon:.4f}"
     
-    set_user_location(chat.id, lat, lon, loc_name)
+    set_user_location(chat.id, lat, lon, loc_short_name)
     set_weather_alert_active(chat.id, True)
     
     w_data = await fetch_weather(lat, lon)
-    weather_text = format_weather_message(w_data, loc_name, is_daily_alert=False) if w_data else ""
+    weather_text = format_weather_message(w_data, loc_short_name, is_daily_alert=False) if w_data else ""
     
-    reply_text = (
-        f"✅ *បានកត់ត្រាទីតាំងរបស់អ្នកជោគជ័យ!* 📍\n\n"
-        f"🏢 ទីតាំង៖ *{loc_name}*\n"
-        f"🌐 កូអរដោនេ៖ `{lat:.4f}, {lon:.4f}`\n\n"
-        f"🌅 *Bot នឹងផ្ញើរបាយការណ៍អាកាសធាតុនៅទីតាំងនេះជូនអ្នករាល់ព្រឹកនៅម៉ោង ៥:០០ ព្រឹកជារៀងរាល់ថ្ងៃ!*\n\n"
-        f"---\n"
-        f"{weather_text}"
-    )
-    await update.message.reply_text(
+    reply_text = format_detailed_location_message(loc_info, weather_text)
+    await safe_reply_text(
+        update.message,
         reply_text,
-        reply_markup=get_back_keyboard(),
-        parse_mode="Markdown"
+        reply_markup=get_back_keyboard()
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -29,7 +29,13 @@ from database import (
     get_active_weather_subscribers,
 )
 from services.video_downloader import extract_video_url
-from services.weather_service import fetch_weather, format_weather_message, reverse_geocode_async
+from services.weather_service import (
+    fetch_weather,
+    format_weather_message,
+    reverse_geocode_async,
+    get_detailed_cambodia_location,
+    format_detailed_location_message,
+)
 from services.expense_service import parse_expense_text, record_transaction, format_budget_report
 from services.tts_service import generate_tts_audio
 from services.moderation_service import check_spam
@@ -116,7 +122,18 @@ async def test_weather_service_async():
     loc_name = await reverse_geocode_async(11.5564, 104.9282)
     print(f"  - Reverse geocoded: {loc_name}")
     assert loc_name is not None
-    print("  [OK] Weather Service verified!")
+
+    detailed = await get_detailed_cambodia_location(11.5564, 104.9282)
+    assert "province" in detailed
+    assert "district" in detailed
+    assert "commune" in detailed
+    assert "village" in detailed
+    print(f"  - Detailed Location Hierarchy:")
+    print(f"    * 🏡 ភូមិ/ផ្លូវ: {detailed['village']}")
+    print(f"    * 🏘️ សង្កាត់/ឃុំ: {detailed['commune']}")
+    print(f"    * 🏢 ខណ្ឌ/ស្រុក: {detailed['district']}")
+    print(f"    * 🏛️ រាជធានី/ខេត្ត: {detailed['province']}")
+    print("  [OK] Weather Service & Detailed Location verified!")
 
 def test_expense_tracker():
     print("\n[5] Testing Expense & Income Tracker...")

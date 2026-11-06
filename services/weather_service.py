@@ -36,27 +36,133 @@ HTTP_HEADERS = {
     "Accept": "application/json"
 }
 
+async def get_detailed_cambodia_location(lat: float, lon: float) -> Dict[str, Any]:
+    """
+    Reverse geocode coordinates to detailed Cambodian administrative hierarchy:
+    - 🏡 ភូមិ / ផ្លូវ (Village / Road)
+    - 🏘️ សង្កាត់ / ឃុំ (Sangkat / Commune)
+    - 🏢 ខណ្ឌ / ស្រុក / ក្រុង (Khan / District / Municipality)
+    - 🏛️ រាជធានី / ខេត្ត (Capital / Province)
+    """
+    headers = {
+        "User-Agent": "TelegramAssistantBot/3.0 (https://github.com/cheat870/assistant_bot; contact: admin@telegram.org)",
+        "Accept": "application/json"
+    }
+    osm_addr = {}
+    bdc_data = {}
+
+    async with httpx.AsyncClient(timeout=6.0, headers=headers) as client:
+        # 1. Fetch OpenStreetMap Nominatim
+        try:
+            url_osm = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json&accept-language=km,en"
+            r1 = await client.get(url_osm)
+            if r1.status_code == 200:
+                osm_addr = r1.json().get("address", {})
+        except Exception as e:
+            logger.warning(f"OSM Nominatim error: {e}")
+
+        # 2. Fetch BigDataCloud
+        try:
+            url_bdc = f"https://api.bigdatacloud.net/data/reverse-geocode-client?latitude={lat}&longitude={lon}&localityLanguage=km"
+            r2 = await client.get(url_bdc)
+            if r2.status_code == 200:
+                bdc_data = r2.json()
+        except Exception as e:
+            logger.warning(f"BigDataCloud error: {e}")
+
+    # Extract Province / Capital (រាជធានី / ខេត្ត)
+    province = osm_addr.get("state") or bdc_data.get("principalSubdivision") or ""
+    if province:
+        if not any(k in province for k in ["រាជធានី", "ខេត្ត"]):
+            province = f"រាជធានី {province}" if "ភ្នំពេញ" in province else f"ខេត្ត {province}"
+    else:
+        province = "រាជធានីភ្នំពេញ"
+
+    # Extract District / Khan (ខណ្ឌ / ស្រុក / ក្រុង)
+    district = ""
+    # Try BigDataCloud adminLevel 6
+    for adm in bdc_data.get("localityInfo", {}).get("administrative", []):
+        if adm.get("adminLevel") == 6:
+            district = adm.get("name")
+            break
+    if not district:
+        for k in ["county", "city_district", "district", "town", "city"]:
+            val = osm_addr.get(k)
+            if val and not any(bad in val.lower() for bad in ["service", "shop", "hotel", "consult", "guest"]):
+                district = val
+                break
+    if not district:
+        district = bdc_data.get("locality") or ""
+    if district and not any(k in district for k in ["ខណ្ឌ", "ស្រុក", "ក្រុង"]):
+        district = f"ក្រុង/ស្រុក {district}"
+    if not district:
+        district = "មិនបានបញ្ជាក់"
+
+    # Extract Sangkat / Commune (សង្កាត់ / ឃុំ) and Village (ភូមិ)
+    commune = ""
+    village = ""
+    raw_v = osm_addr.get("village") or osm_addr.get("hamlet") or osm_addr.get("suburb") or osm_addr.get("neighbourhood") or ""
+    raw_q = osm_addr.get("quarter") or osm_addr.get("city_district") or ""
+    road = osm_addr.get("road") or ""
+
+    if "សង្កាត់" in raw_v or "ឃុំ" in raw_v:
+        commune = raw_v
+    elif "សង្កាត់" in raw_q or "ឃុំ" in raw_q:
+        commune = raw_q
+    else:
+        village = raw_v
+
+    if not village:
+        village = road if road else "ក្បែរទីតាំងនេះ"
+
+    if not commune:
+        commune = "មិនមានទិន្នន័យច្បាស់លាស់"
+
+    short_name = f"{district}, {province}".strip(", ")
+
+    return {
+        "village": village,
+        "commune": commune,
+        "district": district,
+        "province": province,
+        "road": road,
+        "lat": lat,
+        "lon": lon,
+        "short_name": short_name,
+    }
+
 async def reverse_geocode_async(lat: float, lon: float) -> str:
     """Reverse geocode coordinates to location name in Khmer."""
     try:
-        url = f"https://api.bigdatacloud.net/data/reverse-geocode-client?latitude={lat}&longitude={lon}&localityLanguage=km"
-        async with httpx.AsyncClient(timeout=8.0, headers=HTTP_HEADERS) as client:
-            resp = await client.get(url)
-            if resp.status_code == 200:
-                data = resp.json()
-                locality = data.get("locality") or ""
-                city = data.get("city") or data.get("principalSubdivision") or ""
-                country = data.get("countryName") or ""
-                
-                parts = [p for p in [locality, city] if p]
-                if parts:
-                    return ", ".join(parts)
-                elif country:
-                    return f"{country} ({lat:.2f}, {lon:.2f})"
+        info = await get_detailed_cambodia_location(lat, lon)
+        return info.get("short_name") or f"កូអរដោនេ ({lat:.2f}, {lon:.2f})"
     except Exception as e:
         logger.warning(f"Reverse geocode failed: {e}")
-        
-    return f"កូអរដោនេ ({lat:.2f}, {lon:.2f})"
+        return f"កូអរដោនេ ({lat:.2f}, {lon:.2f})"
+
+def format_detailed_location_message(loc_info: Dict[str, Any], weather_text: str = "") -> str:
+    """Format full Cambodian administrative location card."""
+    lat = loc_info.get("lat", 0.0)
+    lon = loc_info.get("lon", 0.0)
+    province = loc_info.get("province", "រាជធានីភ្នំពេញ")
+    district = loc_info.get("district", "មិនបានបញ្ជាក់")
+    commune = loc_info.get("commune", "មិនមានទិន្នន័យច្បាស់លាស់")
+    village = loc_info.get("village", "ក្បែរទីតាំងនេះ")
+
+    msg = (
+        f"📍 *ព័ត៌មានទីតាំងជាក់ស្តែងរបស់អ្នក (Current Location)* 🇰🇭\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🏛️ *រាជធានី / ខេត្ត៖* `{province}`\n"
+        f"🏢 *ខណ្ឌ / ស្រុក / ក្រុង៖* `{district}`\n"
+        f"🏘️ *សង្កាត់ / ឃុំ៖* `{commune}`\n"
+        f"🏡 *ភូមិ / ផ្លូវ៖* `{village}`\n"
+        f"📌 *កូអរដោនេ GPS៖* `{lat:.5f}, {lon:.5f}`\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🌅 *Bot បានកំណត់ទីតាំងនេះសម្រាប់ដំណឹងអាកាសធាតុ ៥:០០ ព្រឹកជារៀងរាល់ថ្ងៃ!*\n\n"
+    )
+    if weather_text:
+        msg += f"---\n{weather_text}"
+    return msg
 
 async def fetch_weather(lat: float = DEFAULT_LAT, lon: float = DEFAULT_LON) -> Optional[Dict[str, Any]]:
     """Fetch real-time weather and today's forecast from Open-Meteo."""
