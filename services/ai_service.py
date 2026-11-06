@@ -16,12 +16,14 @@ SYSTEM_PROMPT = (
 # In-memory cache for the confirmed working model
 _cached_working_model: Optional[str] = None
 
-# Free-tier stable models in priority order
+# Google officially recommends gemini-3.8-flash for newly created projects
 DEFAULT_CANDIDATES = [
-    "gemini-1.5-flash",
+    "gemini-3.8-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash",
     "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-1.5-pro",
+    "gemini-1.5-flash",
 ]
 
 DISALLOWED_SUBSTRINGS = ["live", "realtime", "streaming", "embed", "imagen", "veo", "tts", "aqa"]
@@ -63,10 +65,10 @@ def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT):
             name = (m.name or "").replace("models/", "")
             if is_valid_generation_model(name) and "flash" in name.lower():
                 listed.append(name)
-        # Prioritize 1.5-flash if available
-        if "gemini-1.5-flash" in listed:
-            listed.remove("gemini-1.5-flash")
-            listed.insert(0, "gemini-1.5-flash")
+        # Prioritize 3.8-flash as recommended by Google
+        if "gemini-3.8-flash" in listed:
+            listed.remove("gemini-3.8-flash")
+            listed.insert(0, "gemini-3.8-flash")
         for m in reversed(listed):
             if m not in candidates:
                 candidates.append(m)
