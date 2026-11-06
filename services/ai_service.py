@@ -13,17 +13,19 @@ SYSTEM_PROMPT = (
     "Keep answers concise, helpful, and formatted with emojis."
 )
 
-# Robust fallback list of Gemini models
-GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest"]
+# In-memory cache for the confirmed working model
+_cached_working_model: Optional[str] = None
 
 def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT):
-    """Synchronous worker that calls Gemini with automatic fallback across models."""
+    """Synchronous worker that calls Gemini with automatic dynamic model discovery and fallback."""
     from google.genai import types
-    last_err = None
-    for model_name in GEMINI_MODELS:
+    global _cached_working_model
+
+    # Try cached model first for maximum speed
+    if _cached_working_model:
         try:
             return client.models.generate_content(
-                model=model_name,
+                model=_cached_working_model,
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt
@@ -32,11 +34,59 @@ def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT):
         except Exception as e:
             err_msg = str(e).lower()
             if "404" in err_msg or "not found" in err_msg or "not available" in err_msg:
-                logger.warning(f"Gemini model {model_name} unavailable, falling back: {e}")
+                logger.warning(f"Cached model {_cached_working_model} failed, resetting cache...")
+                _cached_working_model = None
+            else:
+                raise e
+
+    # Default priority candidates
+    candidates = [
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+    ]
+
+    # Dynamically query available models permitted for this API key
+    try:
+        listed = []
+        for m in client.models.list():
+            name = (m.name or "").replace("models/", "")
+            if "flash" in name.lower() and "embed" not in name.lower():
+                listed.append(name)
+        if listed:
+            listed.sort(reverse=True)
+            for m in reversed(listed):
+                if m in candidates:
+                    candidates.remove(m)
+                candidates.insert(0, m)
+    except Exception as e:
+        logger.warning(f"Could not list models: {e}")
+
+    last_err = None
+    for model_name in candidates:
+        try:
+            logger.info(f"Attempting Gemini generation with model: {model_name}")
+            resp = client.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt
+                )
+            )
+            # Successfully generated; cache this working model
+            _cached_working_model = model_name
+            logger.info(f"Successfully connected to Gemini model: {model_name}")
+            return resp
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "404" in err_msg or "not found" in err_msg or "not available" in err_msg or "not supported" in err_msg:
+                logger.warning(f"Gemini model {model_name} unavailable ({e}), trying next...")
                 last_err = e
                 continue
             raise e
-            
+
     if last_err:
         raise last_err
 
