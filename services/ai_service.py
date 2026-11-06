@@ -13,19 +13,15 @@ SYSTEM_PROMPT = (
     "Keep answers concise, helpful, and formatted with emojis."
 )
 
-# In-memory cache for the confirmed working model
-_cached_working_model: Optional[str] = None
+# Initial default working model recommended by Google for 2026
+_cached_working_model: Optional[str] = "gemini-3.8-flash"
 
-# Google officially recommends gemini-3.8-flash for newly created projects
+# Primary candidates in priority order
 DEFAULT_CANDIDATES = [
     "gemini-3.8-flash",
     "gemini-3.5-flash",
     "gemini-3.1-flash-lite",
     "gemini-flash-latest",
-    "gemini-flash-lite-latest",
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
 ]
 
 DISALLOWED_SUBSTRINGS = ["live", "realtime", "streaming", "embed", "imagen", "veo", "tts", "aqa"]

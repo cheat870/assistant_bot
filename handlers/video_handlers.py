@@ -82,31 +82,32 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
             return
 
     # 2. Quick routing for persistent bottom keyboard buttons
-    if text == "🏠 ផ្ទាំង Menu មេ":
+    clean_text = text.strip()
+    if clean_text in ["🏠 ផ្ទាំង Menu មេ", "Menu", "មឺនុយ", "ផ្ទាំងដើម"]:
         await start_command(update, context)
         return
-    elif text == "📊 ចំណូល-ចំណាយ":
+    elif clean_text in ["📊 ចំណូល-ចំណាយ", "ចំណូល-ចំណាយ", "ចំណាយ", "budget"]:
         await budget_command(update, context)
         return
-    elif text == "📰 ព័ត៌មានពេលព្រឹក":
+    elif clean_text in ["📰 ព័ត៌មានពេលព្រឹក", "ព័ត៌មានពេលព្រឹក", "ព័ត៌មាន", "news"]:
         await news_command(update, context)
         return
-    elif text == "🌤️ អាកាសធាតុ":
+    elif clean_text in ["🌤️ អាកាសធាតុ", "អាកាសធាតុ", "weather"]:
         await weather_command(update, context)
         return
-    elif text == "🗓️ ប្រតិទិនបុណ្យជាតិ":
+    elif clean_text in ["🗓️ ប្រតិទិនបុណ្យជាតិ", "ប្រតិទិនបុណ្យជាតិ", "បុណ្យជាតិ", "calendar"]:
         await calendar_command(update, context)
         return
-    elif text == "💰 សេដ្ឋកិច្ច/មាស/សាំង":
+    elif clean_text in ["💰 សេដ្ឋកិច្ច/មាស/សាំង", "សេដ្ឋកិច្ច/មាស/សាំង", "សេដ្ឋកិច្ច", "finance"]:
         await finance_command(update, context)
         return
-    elif text == "⏰ Reminders":
+    elif clean_text in ["⏰ Reminders", "Reminders", "រំលឹក"]:
         await reminders_command(update, context)
         return
-    elif text == "✨ AI Chat":
+    elif clean_text in ["✨ AI Chat", "AI Chat", "ai"]:
         await aimode_command(update, context)
         return
-    elif text == "📥 របៀបទាញយក":
+    elif clean_text in ["📥 របៀបទាញយក", "របៀបទាញយក"]:
         help_msg = (
             "📥 *របៀបទាញយកវីដេអូ & MP3 & Cover HD៖*\n\n"
             "1. ចូលទៅកាន់ TikTok, YouTube, Facebook, Instagram ឬ X/Twitter\n"
@@ -114,7 +115,7 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
             "3. ផ្ញើ (Paste) Link ចូលក្នុង Bot នេះភ្លាមៗ\n"
             "4. Bot នឹងទាញយកវីដេអូ និងមានជម្រើសសម្រាប់ទាញយក MP3 ឬ Cover HD ដោយស្វ័យប្រវត្ត!"
         )
-        await update.message.reply_text(help_msg, parse_mode="Markdown")
+        await safe_reply_text(update.message, help_msg)
         return
 
     # 3. Check for natural language expense & income tracking (e.g. ចាយ 20,000៛ ញ៉ាំបាយ, ចំណាយ 5$ coffee)

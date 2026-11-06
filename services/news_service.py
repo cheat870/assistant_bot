@@ -88,17 +88,21 @@ async def generate_morning_news_digest() -> str:
                 f"and include the date ({date_str}). Keep it engaging, easy to read on mobile, and polite.\n\n"
                 f"{raw_text}"
             )
-            resp = await asyncio.to_thread(_call_gemini_api, client, ai_prompt)
+            # Fast AI summary with 5-second timeout; fallback immediately to clean digest if AI is busy
+            resp = await asyncio.wait_for(
+                asyncio.to_thread(_call_gemini_api, client, ai_prompt),
+                timeout=5.0
+            )
             return (
                 f"🌅 *ព្រឹត្តិបត្រព័ត៌មានពេលព្រឹក ៧:០០ AM*\n"
                 f"📅 កាលបរិច្ឆេទ៖ {date_str}\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
                 f"{resp.text}\n\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"💡 _ប្រើពាក្យបញ្ជា_ `/weather` _ដើម្បីពិនិត្យអាកាសធាតុ ឬ_ `/rate` _ដើម្បីពិនិត្យអត្រាប្តូរប្រាក់!_"
+                f"💡 _ប្រើពាក្យបញ្ជា_ `/weather` _ដើម្បីពិនិត្យអាកាសធាតុ ឬ_ `/finance` _ដើម្បីពិនិត្យអត្រាប្តូរប្រាក់!_"
             )
         except Exception as e:
-            logger.warning(f"Could not summarize news with AI: {e}")
+            logger.warning(f"Could not summarize news with AI (timeout/demand spike): {e}")
 
     # Fallback formatting without AI
     msg = f"🌅 *ព្រឹត្តិបត្រព័ត៌មានពេលព្រឹក ៧:០០ AM*\n"

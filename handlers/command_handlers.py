@@ -771,13 +771,21 @@ async def sound_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # -------------------------------------------------------------
 async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """View Morning News Digest: /news."""
-    status_msg = await update.message.reply_text("📰 *កំពុងទាញយកព័ត៌មានជាតិ & បច្ចេកវិទ្យា...*", parse_mode="Markdown")
+    await update.message.chat.send_action("typing")
+    status_msg = await safe_reply_text(update.message, "📰 *កំពុងទាញយកព័ត៌មានជាតិ & បច្ចេកវិទ្យា...*")
     try:
         digest = await generate_morning_news_digest()
-        await safe_edit_text(status_msg, digest)
+        if status_msg:
+            await safe_edit_text(status_msg, digest)
+        else:
+            await safe_reply_text(update.message, digest)
     except Exception as e:
         logger.error(f"News error: {e}")
-        await safe_edit_text(status_msg, f"❌ មិនអាចទាញយកព័ត៌មានបានទេ៖ {str(e)[:120]}")
+        err_msg = f"❌ មិនអាចទាញយកព័ត៌មានបានទេ៖ {str(e)[:120]}"
+        if status_msg:
+            await safe_edit_text(status_msg, err_msg)
+        else:
+            await safe_reply_text(update.message, err_msg)
 
 # -------------------------------------------------------------
 # Group Anti-Spam & Moderation Control Handler
