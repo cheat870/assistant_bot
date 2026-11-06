@@ -13,22 +13,41 @@ SYSTEM_PROMPT = (
     "Keep answers concise, helpful, and formatted with emojis."
 )
 
+# Robust fallback list of Gemini models
+GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest"]
+
+def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT):
+    """Synchronous worker that calls Gemini with automatic fallback across models."""
+    from google.genai import types
+    last_err = None
+    for model_name in GEMINI_MODELS:
+        try:
+            return client.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt
+                )
+            )
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "404" in err_msg or "not found" in err_msg or "not available" in err_msg:
+                logger.warning(f"Gemini model {model_name} unavailable, falling back: {e}")
+                last_err = e
+                continue
+            raise e
+            
+    if last_err:
+        raise last_err
+
 async def query_ai(prompt: str) -> str:
     """Query Gemini or ChatGPT for a single question."""
     if GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here":
         try:
             from google import genai
-            from google.genai import types
             client = genai.Client(api_key=GEMINI_API_KEY)
             
-            response = await asyncio.to_thread(
-                client.models.generate_content,
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT
-                )
-            )
+            response = await asyncio.to_thread(_call_gemini_api, client, prompt)
             return f"✨ *Gemini ឆ្លើយតប៖*\n\n{response.text}"
         except Exception as e:
             logger.error(f"Gemini error: {e}")
@@ -86,15 +105,7 @@ async def query_continuous_ai(chat_id: int, user_prompt: str) -> str:
             )
         )
         
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model="gemini-2.5-flash",
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT
-            )
-        )
-        
+        response = await asyncio.to_thread(_call_gemini_api, client, contents)
         reply_text = response.text or "សូមអភ័យទោស ខ្ញុំមិនអាចឆ្លើយតបបានទេនៅពេលនេះ។"
         
         # Save to chat history memory
@@ -108,7 +119,7 @@ async def query_continuous_ai(chat_id: int, user_prompt: str) -> str:
         return f"❌ AI Error: {str(e)[:150]}"
 
 async def process_voice_ai(voice_bytes: bytes, mime_type: str = "audio/ogg") -> str:
-    """Understand and respond to Telegram voice message using Gemini 2.5 Flash."""
+    """Understand and respond to Telegram voice message using Gemini."""
     if not (GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here"):
         return (
             "🎙️ *បានទទួលសារជាសំឡេង (Voice Message)!*\n\n"
@@ -127,15 +138,7 @@ async def process_voice_ai(voice_bytes: bytes, mime_type: str = "audio/ogg") -> 
             "Understand what the user is saying or asking, and reply directly with a helpful, natural, and friendly response in Khmer."
         )
         
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model="gemini-2.5-flash",
-            contents=[audio_part, instruction],
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT
-            )
-        )
-        
+        response = await asyncio.to_thread(_call_gemini_api, client, [audio_part, instruction])
         reply_text = response.text or "ខ្ញុំបានស្តាប់សារជាសំឡេងរបស់អ្នកហើយ ប៉ុន្តែពុំមានចម្លើយជាក់លាក់ទេ។"
         return f"🎙️ *Gemini Voice AI ឆ្លើយតប៖*\n\n{reply_text}"
         
@@ -144,7 +147,7 @@ async def process_voice_ai(voice_bytes: bytes, mime_type: str = "audio/ogg") -> 
         return f"❌ Voice AI Error: {str(e)[:150]}"
 
 async def process_vision_ai(image_bytes: bytes, mime_type: str = "image/jpeg", caption: str = "") -> str:
-    """Analyze image / OCR / translate / homework solve using Gemini 2.5 Flash."""
+    """Analyze image / OCR / translate / homework solve using Gemini."""
     if not (GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here"):
         return (
             "📷 *បានទទួលរូបភាព (Vision AI)!*\n\n"
@@ -167,15 +170,7 @@ async def process_vision_ai(image_bytes: bytes, mime_type: str = "image/jpeg", c
             "Always respond in polite, clear Khmer."
         )
         
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model="gemini-2.5-flash",
-            contents=[image_part, instruction],
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT
-            )
-        )
-        
+        response = await asyncio.to_thread(_call_gemini_api, client, [image_part, instruction])
         reply_text = response.text or "មិនអាចវិភាគរូបភាពបានទេ។"
         return f"📷 *Gemini Vision AI (OCR & វិភាគរូបភាព)៖*\n\n{reply_text}"
         
