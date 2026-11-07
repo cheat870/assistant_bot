@@ -689,20 +689,26 @@ async def song_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         res = await download_song(query)
         file_path = res["file_path"]
+        dur = int(res.get("duration", 0) or 0)
+        
+        caption = (
+            f"🎧 *{res['title']}*\n"
+            f"👤 *តារាចម្រៀង:* {res['performer']}\n"
+            f"⏱️ *រយៈពេល:* {res['duration_str']}\n\n"
+            f"✨ Smart Assistant Bot 🎵"
+        )
+
         with open(file_path, "rb") as audio_file:
-            caption = (
-                f"🎧 *{res['title']}*\n"
-                f"👤 *តារាចម្រៀង:* {res['performer']}\n"
-                f"⏱️ *រយៈពេល:* {res['duration_str']}\n\n"
-                f"✨ Smart Assistant Bot 🎵"
-            )
             await update.message.reply_audio(
                 audio=audio_file,
                 title=res["title"],
                 performer=res["performer"],
-                duration=res["duration"],
+                duration=dur,
                 caption=caption,
-                parse_mode="Markdown"
+                parse_mode="Markdown",
+                read_timeout=300.0,
+                write_timeout=300.0,
+                connect_timeout=60.0,
             )
         cleanup_file(file_path)
         try:
@@ -716,7 +722,11 @@ async def song_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_edit_text(status_msg, "❌ ការទាញយកចម្រៀងលើសម៉ោងកំណត់ (Timeout)។ សូមសាកល្បងម្តងទៀត ឬវាយឈ្មោះបទឱ្យកាន់តែច្បាស់។")
     except Exception as e:
         logger.error(f"Song download error: {e}")
-        await safe_edit_text(status_msg, f"❌ មិនអាចទាញយកចម្រៀងបានទេ៖ {str(e)[:150]}")
+        err_str = str(e).lower()
+        if "timed out" in err_str or "timeout" in err_str:
+            await safe_edit_text(status_msg, "❌ ការ Upload ឯកសារចម្រៀងទៅ Telegram យឺតលើសម៉ោងកំណត់។ សូមសាកល្បងម្ដងទៀត។")
+        else:
+            await safe_edit_text(status_msg, f"❌ មិនអាចទាញយកចម្រៀងបានទេ៖ {str(e)[:150]}")
 
 # -------------------------------------------------------------
 # AI Background Remover Handler

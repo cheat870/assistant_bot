@@ -36,6 +36,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
+        "ignoreerrors": True,
         "socket_timeout": 15,
         "retries": 2,
         "concurrent_fragment_downloads": 5,
@@ -48,6 +49,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
+        "ignoreerrors": True,
         "socket_timeout": 15,
         "retries": 1,
         "extractor_args": {
@@ -69,14 +71,14 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
             logger.warning(f"Direct YouTube download failed: {e}")
 
     # Primary Strategy for Search: SoundCloud (instant 5-8s download, never challenges datacenter IPs)
-    search_target_sc = query if is_url else f"scsearch1:{query}"
+    search_target_sc = query if is_url else f"scsearch3:{query}"
     try:
         with yt_dlp.YoutubeDL(ydl_opts_sc) as ydl:
             info = ydl.extract_info(search_target_sc, download=True)
             if "entries" in info:
-                if info["entries"]:
-                    entry = info["entries"][0]
-                    return _process_downloaded_entry(entry, temp_dir)
+                valid_entries = [e for e in info.get("entries", []) if e]
+                if valid_entries:
+                    return _process_downloaded_entry(valid_entries[0], temp_dir)
             elif info:
                 return _process_downloaded_entry(info, temp_dir)
     except Exception as e_sc:
