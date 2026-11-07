@@ -244,75 +244,112 @@ def get_location_selection_keyboard() -> InlineKeyboardMarkup:
     ])
 
 # -------------------------------------------------------------
+# Core Single-Message Manager ("បង្ហាញសារថ្មី លុបសារចាស់")
+# -------------------------------------------------------------
+async def send_clean_response(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    text: str,
+    reply_markup=None,
+    parse_mode="Markdown",
+    delete_user_message: bool = True
+):
+    """
+    Core Single-Message Manager ('បង្ហាញសារថ្មី លុបសារចាស់'):
+    1. In private chats, deletes user's trigger message so commands/buttons don't linger.
+    2. Deletes previous active bot message/menu tracked in user_data.
+    3. Safely sends the new message (with markdown entity error fallback).
+    4. Records the new message ID in context.user_data['last_bot_msg_id'] and ['last_menu_id'].
+    """
+    chat = update.effective_chat if update else None
+    if not chat:
+        return None
+    chat_id = chat.id
+    user_msg = update.message if update else None
+
+    # 1. Delete user message in private chat to keep chat clean
+    if delete_user_message and user_msg and chat.type == "private":
+        try:
+            await user_msg.delete()
+        except Exception:
+            pass
+
+    # 2. Delete previous bot message/menu if tracked
+    prev_id = context.user_data.get("last_bot_msg_id") or context.user_data.get("last_menu_id")
+    if prev_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=prev_id)
+        except Exception:
+            pass
+
+    # 3. Send new message safely
+    try:
+        sent = await context.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode
+        )
+    except Exception as e:
+        err_str = str(e).lower()
+        if "parse entities" in err_str or "entity" in err_str:
+            sent = await context.bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=None
+            )
+        else:
+            raise
+
+    # 4. Update tracking
+    context.user_data["last_bot_msg_id"] = sent.message_id
+    context.user_data["last_menu_id"] = sent.message_id
+    return sent
+
+# -------------------------------------------------------------
 # Command Handlers
 # -------------------------------------------------------------
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start command with auto-cleanup and persistent keyboard."""
+    """Handle /start command with 'បង្ហាញសារថ្មី លុបសារចាស់' clean interface."""
     chat = update.effective_chat
     user = update.effective_user
     
     add_subscriber(chat.id, user.username if user else None, chat.type)
     
-    prev_menu_id = context.user_data.get("last_menu_id")
-    if prev_menu_id:
-        try:
-            await context.bot.delete_message(chat_id=chat.id, message_id=prev_menu_id)
-        except Exception:
-            pass
-            
-    if chat.type == "private":
-        try:
-            await update.message.delete()
-        except Exception:
-            pass
-        
     first_name = user.first_name if user else "មិត្តសំឡាញ់"
-    sent_msg = await context.bot.send_message(
-        chat_id=chat.id,
+    await send_clean_response(
+        update=update,
+        context=context,
         text=get_welcome_text(first_name),
         reply_markup=get_main_menu_keyboard(chat.id),
         parse_mode="Markdown"
     )
-    context.user_data["last_menu_id"] = sent_msg.message_id
-    
-    if chat.type == "private":
-        try:
-            await context.bot.send_message(
-                chat_id=chat.id,
-                text="📱 _ចុច Menu ឬប៊ូតុងខាងក្រោមសម្រាប់បញ្ជា Bot:_ ",
-                reply_markup=get_persistent_bottom_keyboard(),
-                parse_mode="Markdown"
-            )
-        except Exception:
-            pass
 
 async def finance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /finance command to view exchange rates, gold, and fuel prices."""
     await update.message.chat.send_action("typing")
     report = await format_finance_report()
-    await update.message.reply_text(
-        report,
-        reply_markup=InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("🔄 ធ្វើបច្ចុប្បន្នភាព", callback_data="btn_finance"),
-                InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
-            ]
-        ]),
-        parse_mode="Markdown"
-    )
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔄 ធ្វើបច្ចុប្បន្នភាព", callback_data="btn_finance"),
+            InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+        ]
+    ])
+    await send_clean_response(update, context, report, reply_markup=keyboard)
 
 async def convert_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /convert <amount> <from> <to> command."""
     args = context.args or []
     if len(args) < 3:
-        await update.message.reply_text(
+        help_msg = (
             "💱 *របៀបប្រើប្រាស់ការប្តូររូបិយប័ណ្ណ៖*\n\n"
             "សូមវាយ៖ `/convert <ចំនួនទឹកប្រាក់> <ពី> <ទៅ>`\n\n"
             "• ឧទាហរណ៍៖ `/convert 100 USD KHR`\n"
             "• ឧទាហរណ៍៖ `/convert 400000 KHR USD`\n"
-            "• ឧទាហរណ៍៖ `/convert 1000 THB KHR`",
-            parse_mode="Markdown"
+            "• ឧទាហរណ៍៖ `/convert 1000 THB KHR`"
         )
+        await send_clean_response(update, context, help_msg, reply_markup=get_back_keyboard())
         return
         
     try:
@@ -320,9 +357,9 @@ async def convert_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from_c = args[1]
         to_c = args[2]
         res = await convert_currency_text(amount, from_c, to_c)
-        await update.message.reply_text(res, parse_mode="Markdown")
+        await send_clean_response(update, context, res, reply_markup=get_back_keyboard())
     except ValueError:
-        await update.message.reply_text("❌ ចំនួនទឹកប្រាក់មិនត្រឹមត្រូវ។ សូមបញ្ចូលលេខជាក់ស្តែង ឧ. `/convert 50 USD KHR`", parse_mode="Markdown")
+        await send_clean_response(update, context, "❌ ចំនួនទឹកប្រាក់មិនត្រឹមត្រូវ។ សូមបញ្ចូលលេខជាក់ស្តែង ឧ. `/convert 50 USD KHR`", reply_markup=get_back_keyboard())
 
 async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /remind <time> <message> command with auto-cleanup of old confirmation messages."""
@@ -555,7 +592,8 @@ async def aimode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "លោកអ្នកអាចសួរ AI ដោយវាយ `/ask <សំណួរ>` ដូចធម្មតា។"
         )
         
-    await update.message.reply_text(
+    await send_clean_response(
+        update, context,
         msg,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("💬 បើក/បិទ AI Mode", callback_data="btn_toggle_aimode")],
@@ -703,7 +741,7 @@ async def income_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_reply_text(update.message, msg)
 
 async def budget_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """View comprehensive budget & expense report: /budget."""
+    """View comprehensive budget & expense report with 'បង្ហាញសារថ្មី លុបសារចាស់': /budget."""
     report = format_budget_report(update.effective_chat.id, days=30)
     keyboard = InlineKeyboardMarkup([
         [
@@ -712,13 +750,17 @@ async def budget_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ],
         [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
     ])
-    await safe_reply_text(update.message, report, reply_markup=keyboard)
+    await send_clean_response(update, context, report, reply_markup=keyboard)
 
 async def clear_expenses_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Clear all expense records for this chat: /clear_expenses."""
     chat_id = update.effective_chat.id
     count = clear_user_expenses(chat_id)
-    await update.message.reply_text(f"✅ បានលុបកំណត់ត្រាចំណូល-ចំណាយចំនួន {count} ជោគជ័យ!")
+    await send_clean_response(
+        update, context,
+        f"✅ បានលុបកំណត់ត្រាចំណូល-ចំណាយចំនួន {count} ជោគជ័យ!",
+        reply_markup=get_back_keyboard()
+    )
 
 # -------------------------------------------------------------
 # Text-to-Speech (TTS) & Audio Speech Handler
@@ -960,22 +1002,22 @@ async def sound_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Morning News Digest Handler
 # -------------------------------------------------------------
 async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """View Morning News Digest: /news."""
+    """View Morning News Digest with 'បង្ហាញសារថ្មី លុបសារចាស់': /news."""
     await update.message.chat.send_action("typing")
-    status_msg = await safe_reply_text(update.message, "📰 *កំពុងទាញយកព័ត៌មានជាតិ & បច្ចេកវិទ្យា...*")
+    status_msg = await send_clean_response(update, context, "📰 *កំពុងទាញយកព័ត៌មានជាតិ & បច្ចេកវិទ្យា...*")
     try:
         digest = await generate_morning_news_digest()
         if status_msg:
-            await safe_edit_text(status_msg, digest)
+            await safe_edit_text(status_msg, digest, reply_markup=get_back_keyboard())
         else:
-            await safe_reply_text(update.message, digest)
+            await send_clean_response(update, context, digest, reply_markup=get_back_keyboard())
     except Exception as e:
         logger.error(f"News error: {e}")
         err_msg = f"❌ មិនអាចទាញយកព័ត៌មានបានទេ៖ {str(e)[:120]}"
         if status_msg:
-            await safe_edit_text(status_msg, err_msg)
+            await safe_edit_text(status_msg, err_msg, reply_markup=get_back_keyboard())
         else:
-            await safe_reply_text(update.message, err_msg)
+            await send_clean_response(update, context, err_msg, reply_markup=get_back_keyboard())
 
 # -------------------------------------------------------------
 # Group Anti-Spam & Moderation Control Handler
@@ -1567,7 +1609,7 @@ async def handle_document_image(update: Update, context: ContextTypes.DEFAULT_TY
 # Existing Weather, Calendar & Alert Commands
 # -------------------------------------------------------------
 async def weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /weather command to check weather immediately."""
+    """Handle /weather command to check weather immediately with 'បង្ហាញសារថ្មី លុបសារចាស់'."""
     chat_id = update.effective_chat.id
     settings = get_user_weather_settings(chat_id)
     lat = settings.get("latitude") or DEFAULT_LAT
@@ -1577,20 +1619,17 @@ async def weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.chat.send_action("typing")
     w_data = await fetch_weather(lat, lon)
     if not w_data:
-        await safe_reply_text(update.message, "❌ មិនអាចទាញយកព័ត៌មានអាកាសធាតុបានទេ សូមព្យាយាមម្តងទៀត។")
+        await send_clean_response(update, context, "❌ មិនអាចទាញយកព័ត៌មានអាកាសធាតុបានទេ សូមព្យាយាមម្តងទៀត។", reply_markup=get_back_keyboard())
         return
         
     msg = format_weather_message(w_data, loc_name, is_daily_alert=False)
-    await safe_reply_text(
-        update.message,
-        msg,
-        reply_markup=InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("📍 ប្ដូរទីតាំង", callback_data="btn_location_menu"),
-                InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
-            ]
-        ])
-    )
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📍 ប្ដូរទីតាំង", callback_data="btn_location_menu"),
+            InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+        ]
+    ])
+    await send_clean_response(update, context, msg, reply_markup=keyboard)
 
 async def location_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /location command to configure weather location."""
@@ -1604,7 +1643,8 @@ async def location_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👉 *ជម្រើសទី ១:* ចុចប៊ូតុង **📍 ផ្ញើទីតាំង GPS** នៅលើក្ដារចុចខាងក្រោមដើម្បីកំណត់ទីតាំងស្វ័យប្រវត្តិតាមរយៈ GPS\n"
         "👉 *ជម្រើសទី ២:* ចុចជ្រើសរើសរាជធានី-ខេត្តខាងក្រោមនេះ៖"
     )
-    await update.message.reply_text(
+    await send_clean_response(
+        update, context,
         text,
         reply_markup=get_location_selection_keyboard(),
         parse_mode="Markdown"
@@ -1621,14 +1661,14 @@ async def test_weather_command(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.chat.send_action("typing")
     w_data = await fetch_weather(lat, lon)
     if not w_data:
-        await update.message.reply_text("❌ មិនអាចទាញយកព័ត៌មានអាកាសធាតុបានទេ។")
+        await send_clean_response(update, context, "❌ មិនអាចទាញយកព័ត៌មានអាកាសធាតុបានទេ។", reply_markup=get_back_keyboard())
         return
         
     msg = (
         "🧪 *[សារតេស្តសាកល្បង - 5:00 AM Weather Alert Preview]*\n\n"
         + format_weather_message(w_data, loc_name, is_daily_alert=True)
     )
-    await update.message.reply_text(msg, reply_markup=get_back_keyboard(), parse_mode="Markdown")
+    await send_clean_response(update, context, msg, reply_markup=get_back_keyboard(), parse_mode="Markdown")
 
 async def handle_location_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle GPS location sent by user with full Cambodian administrative hierarchy."""
@@ -1651,44 +1691,44 @@ async def handle_location_message(update: Update, context: ContextTypes.DEFAULT_
     weather_text = format_weather_message(w_data, loc_short_name, is_daily_alert=False) if w_data else ""
     
     reply_text = format_detailed_location_message(loc_info, weather_text)
-    await safe_reply_text(
-        update.message,
+    await send_clean_response(
+        update, context,
         reply_text,
         reply_markup=get_back_keyboard()
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /help command."""
+    """Handle /help command with 'បង្ហាញសារថ្មី លុបសារចាស់'."""
     help_text = (
         "💡 *បញ្ជី Command ពេញលេញសម្រាប់ប្រើប្រាស់៖*\n\n"
         "🔹 `/start` - បើកផ្ទាំង Dashboard មេ\n"
         "🔹 `/finance` - មើលអត្រាប្តូរប្រាក់ តម្លៃមាស និងតម្លៃសាំង\n"
+        "🔹 `/budget` - មើលរបាយការណ៍ចំណូល-ចំណាយ\n"
         "🔹 `/convert 100 USD KHR` - គណនាប្តូរប្រាក់រហ័ស\n"
         "🔹 `/remind 08:30 ជួបភ្ញៀវ` - កំណត់ម៉ោងរំលឹកកិច្ចការ\n"
         "🔹 `/reminders` - មើលបញ្ជីសារដាស់តឿនរបស់អ្នក\n"
-        "🔹 `/aimode` - បើក/បិទ AI Continuous Chat Mode\n"
-        "🔹 `/ask <សំណួរ>` - សួរសំណួរទៅ AI (Gemini/GPT)\n"
-        "🔹 `/qr <link/text>` - បង្កើត QR Code ភ្លាមៗ\n"
+        "🔹 `/clean` - សម្អាតសារចាស់ៗទាំងអស់\n"
         "🔹 `/weather` - មើលអាកាសធាតុបច្ចុប្បន្ន\n"
         "🔹 `/location` - កំណត់ទីតាំងអាកាសធាតុ 5AM\n"
         "🔹 `/upcoming` - មើលថ្ងៃបុណ្យដែលខិតជិតមកដល់\n"
         "🔹 `/calendar` - មើលប្រតិទិនឈប់សម្រាកប្រចាំឆ្នាំ\n"
-        "🔹 `/subscribe` - បើកដំណឹងបុណ្យជាតិ ៤:០០ ព្រឹក\n"
-        "🔹 `/unsubscribe` - បិទដំណឹងបុណ្យជាតិ\n"
+        "🔹 `/aimode` - បើក/បិទ AI Continuous Chat Mode\n"
+        "🔹 `/song <ឈ្មោះបទ>` - ទាញយកចម្រៀង MP3 320kbps\n"
+        "🔹 `/enhance` - ធ្វើឱ្យរូបភាពច្បាស់ HD\n"
+        "🔹 `/watermark` - បោះត្រាការពាររូបភាពផលិតផល\n"
+        "🔹 `/pdf` - Chat with PDF សង្ខេប និងឆ្លើយសំណួរ\n"
         "🔹 `/status` - ពិនិត្យស្ថានភាពគណនី\n\n"
-        "🎙️ *Voice AI:* សង្កត់ផ្ញើសារសំឡេងដើម្បីជជែកជាមួយ AI\n"
-        "📷 *Vision OCR:* ផ្ញើរូបភាពដើម្បីអានអក្សរ QR/KHQR ឬដោះស្រាយលំហាត់\n"
         "📥 *Video:* Copy Link (TikTok/YouTube/FB) ផ្ញើចូលទីនេះភ្លាមៗ!"
     )
-    await update.message.reply_text(help_text, reply_markup=get_back_keyboard(), parse_mode="Markdown")
+    await send_clean_response(update, context, help_text, reply_markup=get_back_keyboard(), parse_mode="Markdown")
 
 async def upcoming_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /upcoming command."""
+    """Handle /upcoming command with 'បង្ហាញសារថ្មី លុបសារចាស់'."""
     msg = format_upcoming_message()
-    await update.message.reply_text(msg, reply_markup=get_back_keyboard(), parse_mode="Markdown")
+    await send_clean_response(update, context, msg, reply_markup=get_back_keyboard(), parse_mode="Markdown")
 
 async def calendar_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /calendar command."""
+    """Handle /calendar command with 'បង្ហាញសារថ្មី លុបសារចាស់'."""
     current_year = datetime.now(BOT_TIMEZONE).year
     keyboard = [
         [
@@ -1699,14 +1739,15 @@ async def calendar_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 ត្រឡប់ទៅ Menu ដើម", callback_data="btn_back_main")]
     ]
     msg = format_calendar_message(current_year)
-    await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    await send_clean_response(update, context, msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /subscribe command."""
+    """Handle /subscribe command with 'បង្ហាញសារថ្មី លុបសារចាស់'."""
     chat = update.effective_chat
     user = update.effective_user
     add_subscriber(chat.id, user.username if user else None, chat.type)
-    await update.message.reply_text(
+    await send_clean_response(
+        update, context,
         "✅ *បានបើកការដាស់តឿនដោយជោគជ័យ!*\n\n"
         "Bot នឹងផ្ញើសារជូនដំណឹងនៅម៉ោង *៤:០០ ព្រឹក* (ម៉ោងនៅកម្ពុជា) រាល់ពេលមានថ្ងៃឈប់សម្រាកបុណ្យជាតិ 🇰🇭",
         reply_markup=get_back_keyboard(),
@@ -1714,17 +1755,18 @@ async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /unsubscribe command."""
+    """Handle /unsubscribe command with 'បង្ហាញសារថ្មី លុបសារចាស់'."""
     chat = update.effective_chat
     remove_subscriber(chat.id)
-    await update.message.reply_text(
+    await send_clean_response(
+        update, context,
         "🔕 *បានបិទការដាស់តឿនបុណ្យជាតិរួចរាល់ហើយ។*\nអ្នកអាចបើកវិញបានគ្រប់ពេលដោយប្រើ `/subscribe`។",
         reply_markup=get_back_keyboard(),
         parse_mode="Markdown"
     )
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /status command."""
+    """Handle /status command with 'បង្ហាញសារថ្មី លុបសារចាស់'."""
     chat_id = update.effective_chat.id
     user = update.effective_user
     subscribed = is_subscribed(chat_id)
@@ -1750,10 +1792,10 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⏰ Reminders កំពុងរង់ចាំ: *{len(rems)}* កិច្ចការ\n"
         f"🎉 ថ្ងៃឈប់សម្រាកថ្ងៃនេះ: {today_holiday['name_km'] if today_holiday else 'ពុំមែនជាថ្ងៃឈប់សម្រាកទេ'}\n"
     )
-    await update.message.reply_text(status_text, reply_markup=get_back_keyboard(), parse_mode="Markdown")
+    await send_clean_response(update, context, status_text, reply_markup=get_back_keyboard(), parse_mode="Markdown")
 
 async def test_alert_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /test_alert command."""
+    """Handle /test_alert command with 'បង្ហាញសារថ្មី លុបសារចាស់'."""
     upcoming = get_upcoming_holidays(limit=1)
     sample_holiday = upcoming[0] if upcoming else {
         "date": "2026-04-14",
@@ -1762,7 +1804,7 @@ async def test_alert_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "wishes": "សួស្តីឆ្នាំថ្មីប្រពៃណីជាតិខ្មែរ! 🌸"
     }
     alert_text = "🧪 *[សារតេស្តសាកល្បង - Preview 4:00 AM Alert]*\n\n" + format_alert_message(sample_holiday)
-    await update.message.reply_text(alert_text, reply_markup=get_back_keyboard(), parse_mode="Markdown")
+    await send_clean_response(update, context, alert_text, reply_markup=get_back_keyboard(), parse_mode="Markdown")
 
 async def ask_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /ask command for AI consultation."""

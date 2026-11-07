@@ -95,7 +95,14 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
         if parsed_exp:
             record_transaction(chat.id, parsed_exp)
             msg = format_record_success(parsed_exp)
-            await safe_reply_text(update.message, msg)
+            from handlers.command_handlers import send_clean_response
+            exp_kb = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("📊 មើល Budget", callback_data="btn_budget"),
+                    InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+                ]
+            ])
+            await send_clean_response(update, context, msg, reply_markup=exp_kb)
             return
         await budget_command(update, context)
         return
@@ -122,14 +129,7 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
         await aimode_command(update, context)
         return
     elif any(k in norm_text for k in ["របៀបទាញយក", "របៀបប្រើ", "ជំនួយ"]) or norm_lower in ["help", "/help"]:
-        help_msg = (
-            "📥 *របៀបទាញយកវីដេអូ & MP3 & Cover HD៖*\n\n"
-            "1. ចូលទៅកាន់ TikTok, YouTube, Facebook, Instagram ឬ X/Twitter\n"
-            "2. ចុចពាក្យ **Share** រួចជ្រើសរើស **Copy Link**\n"
-            "3. ផ្ញើ (Paste) Link ចូលក្នុង Bot នេះភ្លាមៗ\n"
-            "4. Bot នឹងទាញយកវីដេអូ និងមានជម្រើសសម្រាប់ទាញយក MP3 ឬ Cover HD ដោយស្វ័យប្រវត្ត!"
-        )
-        await safe_reply_text(update.message, help_msg)
+        await help_command(update, context)
         return
 
     # 3. Check for natural language expense & income tracking (e.g. ចាយ 20,000៛ ញ៉ាំបាយ, ចំណាយ 5$ coffee)
@@ -137,7 +137,14 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
     if parsed_expense:
         record_transaction(chat.id, parsed_expense)
         msg = format_record_success(parsed_expense)
-        await safe_reply_text(update.message, msg)
+        from handlers.command_handlers import send_clean_response
+        exp_kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("📊 មើល Budget", callback_data="btn_budget"),
+                InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+            ]
+        ])
+        await send_clean_response(update, context, msg, reply_markup=exp_kb)
         return
 
     # 4. Check if this is a follow-up question replying to a PDF summary
@@ -177,19 +184,13 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
             "👉 សូមផ្ញើ Link ពី **TikTok, YouTube, Facebook, Instagram ឬ X** ដើម្បីឱ្យខ្ញុំទាញយកវីដេអូជូន\n"
             "ឬចុច Menu ខាងក្រោមដើម្បីប្រើមុខងារផ្សេងៗ៖"
         )
-        prev_menu = context.user_data.get("last_menu_id")
-        if prev_menu and chat.type == "private":
-            try:
-                await context.bot.delete_message(chat_id=chat.id, message_id=prev_menu)
-            except Exception:
-                pass
-
-        sent_menu = await update.message.reply_text(
-            reply_msg,
-            reply_markup=get_main_menu_keyboard(chat.id),
-            parse_mode="Markdown"
+        from handlers.command_handlers import send_clean_response
+        await send_clean_response(
+            update=update,
+            context=context,
+            text=reply_msg,
+            reply_markup=get_main_menu_keyboard(chat.id)
         )
-        context.user_data["last_menu_id"] = sent_menu.message_id
         return
         
     token = get_or_create_media_token(url)
