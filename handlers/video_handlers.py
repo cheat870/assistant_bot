@@ -81,7 +81,15 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 logger.warning(f"Failed to auto-delete spam: {e}")
             return
 
-    # 2. Quick routing for persistent bottom keyboard buttons & friendly text triggers
+    # 2. Record message for 20-minute auto-delete watcher
+    if chat.type == "private" and update.message:
+        try:
+            from database import record_auto_clean_message
+            record_auto_clean_message(chat.id, update.message.message_id)
+        except Exception:
+            pass
+
+    # Quick routing for persistent bottom keyboard buttons & friendly text triggers
     clean_text = text.strip()
     norm_text = clean_text.replace("\ufe0f", "").replace("\ufe0e", "").replace("\u200b", "").strip()
     norm_lower = norm_text.lower()

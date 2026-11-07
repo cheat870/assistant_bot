@@ -48,6 +48,7 @@ from handlers.command_handlers import (
     remind_command,
     reminders_command,
     clean_chat_command,
+    autoclean_command,
     aimode_command,
     qr_command,
     broadcast_command,
@@ -174,6 +175,8 @@ def main():
     app.add_handler(CommandHandler("reminders", reminders_command, block=False))
     app.add_handler(CommandHandler("clean", clean_chat_command, block=False))
     app.add_handler(CommandHandler("clear", clean_chat_command, block=False))
+    app.add_handler(CommandHandler("autoclean", autoclean_command, block=False))
+    app.add_handler(CommandHandler("autodelete", autoclean_command, block=False))
     app.add_handler(CommandHandler("aimode", aimode_command, block=False))
     app.add_handler(CommandHandler("qr", qr_command, block=False))
     app.add_handler(CommandHandler("broadcast", broadcast_command, block=False))

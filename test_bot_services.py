@@ -327,12 +327,40 @@ def test_clean_chat_and_auto_cleanup():
     assert any("សម្អាតសារ" in b for b in bottom_buttons), "Bottom keyboard must contain clean chat button"
     print("  - Persistent bottom keyboard contains '🧹 សម្អាតសារ' button: OK")
 
-    # Verify inline main menu keyboard has clean chat callback
+    # Verify inline main menu keyboard has clean chat and auto-clean toggle callbacks
     main_kb = get_main_menu_keyboard(chat_id=12345)
     inline_callbacks = [btn.callback_data for row in main_kb.inline_keyboard for btn in row if btn.callback_data]
     assert "btn_clean_chat" in inline_callbacks, "Main menu keyboard must contain btn_clean_chat"
-    print("  - Main menu keyboard contains 'btn_clean_chat' callback: OK")
-    print("  [OK] Chat Cleaner & Auto-Cleanup verified!")
+    assert "btn_toggle_autoclean" in inline_callbacks, "Main menu keyboard must contain btn_toggle_autoclean"
+    print("  - Main menu keyboard contains 'btn_clean_chat' and 'btn_toggle_autoclean' callbacks: OK")
+
+    # Test 20-minute auto-clean database logic
+    from database import (
+        record_auto_clean_message,
+        get_expired_auto_clean_messages,
+        delete_auto_clean_message_records,
+        is_auto_clean_enabled,
+        set_auto_clean_enabled,
+    )
+    from datetime import datetime, timedelta
+
+    test_chat = 999888
+    set_auto_clean_enabled(test_chat, True)
+    assert is_auto_clean_enabled(test_chat) is True
+
+    record_auto_clean_message(test_chat, 1001)
+    # Check with future cutoff (simulating 21 minutes later)
+    future_cutoff = (datetime.utcnow() + timedelta(minutes=5)).isoformat()
+    expired = get_expired_auto_clean_messages(future_cutoff)
+    matching = [e for e in expired if e[1] == test_chat and e[2] == 1001]
+    assert len(matching) == 1, "Must find recorded message when past cutoff"
+    
+    # Delete record
+    delete_auto_clean_message_records([matching[0][0]])
+    expired_after = get_expired_auto_clean_messages(future_cutoff)
+    assert not any(e[1] == test_chat and e[2] == 1001 for e in expired_after)
+    print("  - 20-minute auto-delete database pipeline: OK")
+    print("  [OK] Chat Cleaner & 20-Minute Auto-Delete verified!")
 
 if __name__ == "__main__":
     test_holiday_calendar()

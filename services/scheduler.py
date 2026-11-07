@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import time, datetime
+from datetime import time, datetime, timedelta
 from typing import Optional
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application
@@ -18,6 +18,8 @@ from database import (
     get_active_weather_subscribers,
     get_due_reminders,
     mark_reminder_done,
+    get_expired_auto_clean_messages,
+    delete_auto_clean_message_records,
 )
 from services.holiday_calendar import get_today_holiday, format_alert_message
 from services.weather_service import fetch_weather, format_weather_message
@@ -158,8 +160,33 @@ async def check_reminders_job(context):
         except Exception as e:
             logger.warning(f"Failed to deliver reminder {rem['id']}: {e}")
 
+async def check_auto_clean_job(context):
+    """
+    Check and auto-delete messages that are older than 20 minutes.
+    Executes 'រាល់ ២០នាទី វានឹង delete auto' automatically.
+    """
+    try:
+        now_utc = datetime.utcnow()
+        cutoff_iso = (now_utc - timedelta(minutes=20)).isoformat()
+        expired = get_expired_auto_clean_messages(cutoff_iso)
+        if not expired:
+            return
+
+        record_ids_to_delete = []
+        for rec_id, chat_id, msg_id in expired:
+            record_ids_to_delete.append(rec_id)
+            try:
+                await context.application.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+            except Exception:
+                pass
+
+        delete_auto_clean_message_records(record_ids_to_delete)
+        logger.debug(f"Auto-cleaned {len(record_ids_to_delete)} messages older than 20 minutes.")
+    except Exception as e:
+        logger.warning(f"Error in check_auto_clean_job: {e}")
+
 def setup_scheduler(app: Application):
-    """Set up the daily 4:00 AM holiday, 5:00 AM weather alerts, 7:00 AM news, and reminders checker."""
+    """Set up the daily 4:00 AM holiday, 5:00 AM weather alerts, 7:00 AM news, reminders, and 20-min auto-delete."""
     job_queue = app.job_queue
     if not job_queue:
         logger.warning("JobQueue is not enabled in Application.")
@@ -200,3 +227,12 @@ def setup_scheduler(app: Application):
         name="custom_reminders_checker"
     )
     logger.info("Registered custom reminders checker job (every 60s).")
+
+    # 5. 20-Minute Auto-Delete Watcher: Check every 60 seconds for messages >= 20m old
+    job_queue.run_repeating(
+        check_auto_clean_job,
+        interval=60,
+        first=15,
+        name="auto_clean_expired_messages"
+    )
+    logger.info("Registered 20-minute auto-delete watcher job.")

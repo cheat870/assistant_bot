@@ -170,6 +170,10 @@ def get_main_menu_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     ai_active = is_ai_mode(chat_id)
     ai_btn_text = "💬 បិទ AI Continuous Chat" if ai_active else "🤖 បើក AI Continuous Chat"
     
+    from database import is_auto_clean_enabled
+    auto_clean_active = is_auto_clean_enabled(chat_id)
+    auto_clean_text = "🧹 Auto-Clean 20m: ✅" if auto_clean_active else "🧹 Auto-Clean 20m: ❌"
+
     keyboard = [
         [
             InlineKeyboardButton("📥 របៀបទាញយកវីដេអូ", callback_data="btn_video_help"),
@@ -197,11 +201,14 @@ def get_main_menu_keyboard(chat_id: int) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("🛠️ ឧបករណ៍ QR / KHQR", callback_data="btn_tools_menu"),
-            InlineKeyboardButton("🧹 សម្អាតសារចាស់ៗ (/clean)", callback_data="btn_clean_chat"),
+            InlineKeyboardButton(auto_clean_text, callback_data="btn_toggle_autoclean"),
+        ],
+        [
+            InlineKeyboardButton("🧹 សម្អាតសារភ្លាមៗ (/clean)", callback_data="btn_clean_chat"),
+            InlineKeyboardButton("💡 ការណែនាំ (Help)", callback_data="btn_help"),
         ],
         [
             InlineKeyboardButton("✨ ជំនួយការ AI (Gemini)", callback_data="btn_ai_menu"),
-            InlineKeyboardButton("💡 ការណែនាំ (Help)", callback_data="btn_help"),
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -302,9 +309,14 @@ async def send_clean_response(
         else:
             raise
 
-    # 4. Update tracking
+    # 4. Update tracking & schedule for 20-min auto-delete
     context.user_data["last_bot_msg_id"] = sent.message_id
     context.user_data["last_menu_id"] = sent.message_id
+    try:
+        from database import record_auto_clean_message
+        record_auto_clean_message(chat_id, sent.message_id)
+    except Exception:
+        pass
     return sent
 
 # -------------------------------------------------------------
@@ -571,6 +583,26 @@ async def clean_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         parse_mode="Markdown"
     )
     context.user_data["last_menu_id"] = sent_menu.message_id
+
+async def autoclean_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle 20-minute auto-delete: /autoclean."""
+    chat_id = update.effective_chat.id
+    from database import is_auto_clean_enabled, set_auto_clean_enabled
+    current = is_auto_clean_enabled(chat_id)
+    new_state = not current
+    set_auto_clean_enabled(chat_id, new_state)
+    
+    if new_state:
+        msg = (
+            "🧹 *បានបើកមុខងារ Auto-Delete រាល់ ២០ នាទី!* ✅\n\n"
+            "រាល់សារចាស់ៗដែលបានផ្ញើលើសពី ២០ នាទី នឹងត្រូវ Bot លុបចោលដោយស្វ័យប្រវត្តជានិច្ច ដើម្បីរក្សា Chat ឱ្យស្អាតស្រឡះជានិច្ច។"
+        )
+    else:
+        msg = (
+            "🔕 *បានបិទមុខងារ Auto-Delete រាល់ ២០ នាទី!* ❌\n\n"
+            "សារនឹងមិនត្រូវលុបស្វ័យប្រវត្តរាល់ ២០ នាទីទៀតឡើយ។"
+        )
+    await send_clean_response(update, context, msg, reply_markup=get_back_keyboard())
 
 async def aimode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /aimode command to toggle continuous AI chat mode."""
@@ -1350,12 +1382,19 @@ async def watermark_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def safe_reply_text(message, text: str, reply_markup=None, parse_mode="Markdown"):
     """Safely reply with markdown; fallback to plain text if Telegram fails entity parsing."""
     try:
-        return await message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+        sent = await message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
     except Exception as e:
         err_str = str(e).lower()
         if "parse entities" in err_str or "entity" in err_str:
-            return await message.reply_text(text, reply_markup=reply_markup, parse_mode=None)
-        raise
+            sent = await message.reply_text(text, reply_markup=reply_markup, parse_mode=None)
+        else:
+            raise
+    try:
+        from database import record_auto_clean_message
+        record_auto_clean_message(message.chat_id, sent.message_id)
+    except Exception:
+        pass
+    return sent
 
 async def safe_edit_text(message, text: str, reply_markup=None, parse_mode="Markdown"):
     """Safely edit with markdown; fallback to plain text if Telegram fails entity parsing."""
@@ -2295,6 +2334,22 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 await query.answer("🗑️ បានលុបសារនេះរួចរាល់")
             except Exception:
                 await query.answer()
+
+        elif data == "btn_toggle_autoclean":
+            from database import is_auto_clean_enabled, set_auto_clean_enabled
+            current = is_auto_clean_enabled(chat_id)
+            new_state = not current
+            set_auto_clean_enabled(chat_id, new_state)
+            status_alert = "✅ បានបើក Auto-Clean រាល់ ២០ នាទី!" if new_state else "❌ បានបិទ Auto-Clean រាល់ ២០ នាទី!"
+            await query.answer(status_alert)
+            first_name = user.first_name if user else "លោកអ្នក"
+            await query.edit_message_text(
+                get_welcome_text(first_name),
+                reply_markup=get_main_menu_keyboard(chat_id),
+                parse_mode="Markdown"
+            )
+            context.user_data["last_bot_msg_id"] = query.message.message_id
+            context.user_data["last_menu_id"] = query.message.message_id
     except Exception as e:
         logger.warning(f"Callback error: {e}")
         try:

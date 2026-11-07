@@ -1,5 +1,5 @@
 import sqlite3
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta
 from config import DB_PATH
 
@@ -107,6 +107,26 @@ def init_db():
             summary TEXT,
             extracted_text TEXT,
             total_pages INTEGER DEFAULT 1,
+            updated_at TEXT
+        )
+    """)
+
+    # Table for Auto-Clean Message Tracking (20-Minute Auto-Delete)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS auto_clean_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER,
+            message_id INTEGER,
+            created_at TEXT
+        )
+    """)
+
+    # Table for Auto-Clean Settings (defaults to enabled=1, interval=20m)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS auto_clean_settings (
+            chat_id INTEGER PRIMARY KEY,
+            is_enabled INTEGER DEFAULT 1,
+            clean_interval_minutes INTEGER DEFAULT 20,
             updated_at TEXT
         )
     """)
@@ -636,4 +656,68 @@ def clear_pdf_session(chat_id: int) -> bool:
     conn.commit()
     conn.close()
     return True
+
+# -------------------------------------------------------------
+# 20-Minute Auto-Delete & Periodic Cleaner Operations
+# -------------------------------------------------------------
+def record_auto_clean_message(chat_id: int, message_id: int):
+    """Record a message for the 20-minute auto-delete cycle."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO auto_clean_messages (chat_id, message_id, created_at)
+        VALUES (?, ?, ?)
+    """, (chat_id, message_id, datetime.utcnow().isoformat()))
+    conn.commit()
+    conn.close()
+
+def get_expired_auto_clean_messages(cutoff_iso: str) -> List[Tuple[int, int, int]]:
+    """Retrieve all messages that are older than cutoff timestamp (rec_id, chat_id, message_id)."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT m.id, m.chat_id, m.message_id
+        FROM auto_clean_messages m
+        LEFT JOIN auto_clean_settings s ON m.chat_id = s.chat_id
+        WHERE m.created_at <= ? AND (s.is_enabled IS NULL OR s.is_enabled = 1)
+        ORDER BY m.created_at ASC
+        LIMIT 200
+    """, (cutoff_iso,))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def delete_auto_clean_message_records(record_ids: List[int]):
+    """Remove deleted message records from database."""
+    if not record_ids:
+        return
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    placeholders = ",".join(["?"] * len(record_ids))
+    cursor.execute(f"DELETE FROM auto_clean_messages WHERE id IN ({placeholders})", record_ids)
+    conn.commit()
+    conn.close()
+
+def is_auto_clean_enabled(chat_id: int) -> bool:
+    """Check if 20-minute auto-delete is enabled for this chat (defaults to True)."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT is_enabled FROM auto_clean_settings WHERE chat_id = ?", (chat_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return bool(row[0] == 1) if row else True
+
+def set_auto_clean_enabled(chat_id: int, enabled: bool):
+    """Enable or disable 20-minute auto-delete for this chat."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO auto_clean_settings (chat_id, is_enabled, clean_interval_minutes, updated_at)
+        VALUES (?, ?, 20, ?)
+        ON CONFLICT(chat_id) DO UPDATE SET
+            is_enabled = excluded.is_enabled,
+            updated_at = excluded.updated_at
+    """, (chat_id, 1 if enabled else 0, datetime.utcnow().isoformat()))
+    conn.commit()
+    conn.close()
 
