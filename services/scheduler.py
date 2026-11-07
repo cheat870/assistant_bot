@@ -2,6 +2,7 @@ import asyncio
 import logging
 from datetime import time, datetime
 from typing import Optional
+from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application
 import pytz
 
@@ -147,6 +148,9 @@ async def check_reminders_job(context):
             await context.application.bot.send_message(
                 chat_id=rem["chat_id"],
                 text=msg,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🗑️ លុបសារដាស់តឿននេះ", callback_data="btn_delete_this_msg")]
+                ]),
                 parse_mode="Markdown"
             )
             mark_reminder_done(rem["id"])

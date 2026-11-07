@@ -317,6 +317,23 @@ def test_image_location_service():
     assert "Google Maps" in msg
     print("  [OK] Image Location Extraction Service verified!")
 
+def test_clean_chat_and_auto_cleanup():
+    print("\n[14] Testing Chat Cleaner & Auto-Cleanup Keyboards...")
+    from handlers.command_handlers import get_main_menu_keyboard, get_persistent_bottom_keyboard, clean_chat_command
+    
+    # Verify bottom persistent keyboard has clean chat button
+    bottom_kb = get_persistent_bottom_keyboard()
+    bottom_buttons = [btn.text for row in bottom_kb.keyboard for btn in row]
+    assert any("សម្អាតសារ" in b for b in bottom_buttons), "Bottom keyboard must contain clean chat button"
+    print("  - Persistent bottom keyboard contains '🧹 សម្អាតសារ' button: OK")
+
+    # Verify inline main menu keyboard has clean chat callback
+    main_kb = get_main_menu_keyboard(chat_id=12345)
+    inline_callbacks = [btn.callback_data for row in main_kb.inline_keyboard for btn in row if btn.callback_data]
+    assert "btn_clean_chat" in inline_callbacks, "Main menu keyboard must contain btn_clean_chat"
+    print("  - Main menu keyboard contains 'btn_clean_chat' callback: OK")
+    print("  [OK] Chat Cleaner & Auto-Cleanup verified!")
+
 if __name__ == "__main__":
     test_holiday_calendar()
     test_database()
@@ -331,4 +348,5 @@ if __name__ == "__main__":
     test_watermark_service()
     test_welcome_banner_service()
     test_image_location_service()
-    print("\n🎉 ALL 13 TEST SUITES PASSED SUCCESSFULLY! ✅")
+    test_clean_chat_and_auto_cleanup()
+    print("\n🎉 ALL 14 TEST SUITES PASSED SUCCESSFULLY! ✅")

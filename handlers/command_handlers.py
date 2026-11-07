@@ -197,7 +197,7 @@ def get_main_menu_keyboard(chat_id: int) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("🛠️ ឧបករណ៍ QR / KHQR", callback_data="btn_tools_menu"),
-            InlineKeyboardButton("📊 ស្ថានភាពគណនី", callback_data="btn_status"),
+            InlineKeyboardButton("🧹 សម្អាតសារចាស់ៗ (/clean)", callback_data="btn_clean_chat"),
         ],
         [
             InlineKeyboardButton("✨ ជំនួយការ AI (Gemini)", callback_data="btn_ai_menu"),
@@ -212,9 +212,8 @@ def get_persistent_bottom_keyboard() -> ReplyKeyboardMarkup:
         [KeyboardButton("📊 ចំណូល-ចំណាយ"), KeyboardButton("💰 សេដ្ឋកិច្ច/មាស/សាំង")],
         [KeyboardButton("🌤️ អាកាសធាតុ"), KeyboardButton("📰 ព័ត៌មានពេលព្រឹក")],
         [KeyboardButton("📍 ផ្ញើទីតាំង GPS", request_location=True), KeyboardButton("⏰ Reminders")],
-        [KeyboardButton("✨ AI Chat"), KeyboardButton("🏠 ផ្ទាំង Menu មេ")]
+        [KeyboardButton("✨ AI Chat"), KeyboardButton("🧹 សម្អាតសារ"), KeyboardButton("🏠 ផ្ទាំង Menu មេ")]
     ]
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 def get_back_keyboard() -> InlineKeyboardMarkup:
@@ -326,71 +325,215 @@ async def convert_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ ចំនួនទឹកប្រាក់មិនត្រឹមត្រូវ។ សូមបញ្ចូលលេខជាក់ស្តែង ឧ. `/convert 50 USD KHR`", parse_mode="Markdown")
 
 async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /remind <time> <message> command."""
+    """Handle /remind <time> <message> command with auto-cleanup of old confirmation messages."""
+    chat = update.effective_chat
+    chat_id = chat.id
     text = " ".join(context.args) if context.args else ""
+
+    # In private chat, delete user's command message to keep the chat tidy
+    if chat.type == "private":
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+
+    # Clean up previous reminder confirmation/help message if one exists
+    prev_remind_id = context.user_data.get("last_remind_msg_id")
+    if prev_remind_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=prev_remind_id)
+        except Exception:
+            pass
+
     if not text:
-        await update.message.reply_text(
-            "⏰ *របៀបកំណត់សារដាស់តឿន (Custom Reminders)៖*\n\n"
-            "សូមវាយ៖ `/remind <ម៉ោង> <កិច្ចការដែលត្រូវធ្វើ>`\n\n"
-            "👉 *ឧទាហរណ៍ម៉ោងជាក់លាក់៖*\n"
-            "• `/remind 08:30 ត្រូវទៅជួបភ្ញៀវនៅហាងកាហ្វេ`\n"
-            "• `/remind 21:00 លេបថ្នាំ និងចូលគេង`\n\n"
-            "👉 *ឧទាហរណ៍កំណត់តាមនាទី/ម៉ោងបន្ទាប់៖*\n"
-            "• `/remind 15m ឆុងកាហ្វេ និងពិនិត្យ Email`\n"
-            "• `/remind 2h បញ្ចប់របាយការណ៍ការងារ`",
+        sent = await context.bot.send_message(
+            chat_id=chat_id,
+            text=(
+                "⏰ *របៀបកំណត់សារដាស់តឿន (Custom Reminders)៖*\n\n"
+                "សូមវាយ៖ `/remind <ម៉ោង> <កិច្ចការដែលត្រូវធ្វើ>`\n\n"
+                "👉 *ឧទាហរណ៍ម៉ោងជាក់លាក់៖*\n"
+                "• `/remind 08:30 ត្រូវទៅជួបភ្ញៀវនៅហាងកាហ្វេ`\n"
+                "• `/remind 21:00 លេបថ្នាំ និងចូលគេង`\n\n"
+                "👉 *ឧទាហរណ៍កំណត់តាមនាទី/ម៉ោងបន្ទាប់៖*\n"
+                "• `/remind 15m ឆុងកាហ្វេ និងពិនិត្យ Email`\n"
+                "• `/remind 2h បញ្ចប់របាយការណ៍ការងារ`"
+            ),
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("📋 បញ្ជី Reminders", callback_data="btn_reminders"),
+                    InlineKeyboardButton("🧹 សម្អាតសារ", callback_data="btn_clean_chat")
+                ],
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ]),
             parse_mode="Markdown"
         )
+        context.user_data["last_remind_msg_id"] = sent.message_id
         return
         
     parsed = parse_reminder_input(text)
     if not parsed:
-        await update.message.reply_text(
-            "❌ *ទម្រង់ម៉ោងមិនត្រឹមត្រូវ!*\n\n"
-            "សូមបញ្ជាក់ម៉ោងដូចជា៖ `08:30`, `14:00`, `15m`, ឬ `2h` រួមជាមួយអត្ថបទកិច្ចការ។",
+        sent = await context.bot.send_message(
+            chat_id=chat_id,
+            text=(
+                "❌ *ទម្រង់ម៉ោងមិនត្រឹមត្រូវ!*\n\n"
+                "សូមបញ្ជាក់ម៉ោងដូចជា៖ `08:30`, `14:00`, `15m`, ឬ `2h` រួមជាមួយអត្ថបទកិច្ចការ។"
+            ),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🧹 សម្អាតសារ", callback_data="btn_clean_chat")],
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ]),
             parse_mode="Markdown"
         )
+        context.user_data["last_remind_msg_id"] = sent.message_id
         return
         
     remind_at, time_str, message_body = parsed
-    chat_id = update.effective_chat.id
     rem_id = add_reminder(chat_id, remind_at, time_str, message_body)
-    
-    await update.message.reply_text(
-        f"✅ *បានកត់ត្រាសារដាស់តឿនជោគជ័យ!* ⏰\n\n"
-        f"🕒 *ម៉ោងរំលឹក៖* `{time_str}` (ម៉ោងនៅកម្ពុជា)\n"
-        f"📝 *កិច្ចការ៖* {message_body}\n\n"
-        f"🔔 Bot នឹងផ្ញើសាររំលឹកអ្នកចំពេលនេះដោយស្វ័យប្រវត្ត!",
+
+    # Fetch active reminders to display a compact consolidated summary
+    active_rems = get_user_reminders(chat_id)
+    active_summary = ""
+    if active_rems and len(active_rems) > 1:
+        active_lines = [f"• 🕒 `{r['time_str']}`: {r['message'][:28]}" for r in active_rems[-4:]]
+        active_summary = f"\n\n📋 *សារដាស់តឿនសកម្មទាំងអស់ ({len(active_rems)})៖*\n" + "\n".join(active_lines)
+
+    sent = await context.bot.send_message(
+        chat_id=chat_id,
+        text=(
+            f"✅ *បានកត់ត្រាសារដាស់តឿនជោគជ័យ!* ⏰\n\n"
+            f"🕒 *ម៉ោងរំលឹក៖* `{time_str}` (ម៉ោងនៅកម្ពុជា)\n"
+            f"📝 *កិច្ចការ៖* {message_body}\n\n"
+            f"🔔 Bot នឹងផ្ញើសាររំលឹកអ្នកចំពេលនេះដោយស្វ័យប្រវត្ត!"
+            f"{active_summary}"
+        ),
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📋 មើលបញ្ជី Reminders ទាំងអស់", callback_data="btn_reminders")]
+            [
+                InlineKeyboardButton("📋 បញ្ជី Reminders", callback_data="btn_reminders"),
+                InlineKeyboardButton("🧹 សម្អាតសារ", callback_data="btn_clean_chat")
+            ],
+            [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
         ]),
         parse_mode="Markdown"
     )
+    context.user_data["last_remind_msg_id"] = sent.message_id
 
 async def reminders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /reminders command to list user's reminders."""
-    chat_id = update.effective_chat.id
+    """Handle /reminders command to list user's reminders with auto-cleanup."""
+    chat = update.effective_chat
+    chat_id = chat.id
+
+    if chat.type == "private":
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+
+    # Clean up previous reminder card so duplicate lists don't stack up
+    prev_remind_id = context.user_data.get("last_remind_msg_id")
+    if prev_remind_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=prev_remind_id)
+        except Exception:
+            pass
+
     rems = get_user_reminders(chat_id)
     if not rems:
-        await update.message.reply_text(
-            "⏰ *អ្នកពុំទាន់មានសារដាស់តឿននៅឡើយទេ។*\n\n"
-            "ដើម្បីកំណត់ដាស់តឿន សូមវាយ៖\n`/remind <ម៉ោង> <កិច្ចការ>` ឧទាហរណ៍ `/remind 08:30 ជួបភ្ញៀវ`",
-            reply_markup=get_back_keyboard(),
+        sent = await context.bot.send_message(
+            chat_id=chat_id,
+            text=(
+                "⏰ *អ្នកពុំទាន់មានសារដាស់តឿននៅឡើយទេ។*\n\n"
+                "ដើម្បីកំណត់ដាស់តឿន សូមវាយ៖\n`/remind <ម៉ោង> <កិច្ចការ>` ឧទាហរណ៍ `/remind 08:30 ជួបភ្ញៀវ`"
+            ),
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("🧹 សម្អាតសារ", callback_data="btn_clean_chat"),
+                    InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+                ]
+            ]),
             parse_mode="Markdown"
         )
+        context.user_data["last_remind_msg_id"] = sent.message_id
         return
         
     lines = ["⏰ *បញ្ជីសារដាស់តឿនរបស់អ្នក (Active Reminders)៖*\n"]
     buttons = []
     for r in rems:
         lines.append(f"• 🕒 *`{r['time_str']}`*: {r['message']}")
-        buttons.append([InlineKeyboardButton(f"❌ លុប: {r['message'][:25]}", callback_data=f"delrem_{r['id']}")])
+        buttons.append([InlineKeyboardButton(f"❌ លុប: {r['message'][:20]}", callback_data=f"delrem_{r['id']}")])
         
-    buttons.append([InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")])
-    await update.message.reply_text(
-        "\n".join(lines),
+    buttons.append([
+        InlineKeyboardButton("🧹 សម្អាតសារ", callback_data="btn_clean_chat"),
+        InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+    ])
+    sent = await context.bot.send_message(
+        chat_id=chat_id,
+        text="\n".join(lines),
         reply_markup=InlineKeyboardMarkup(buttons),
         parse_mode="Markdown"
     )
+    context.user_data["last_remind_msg_id"] = sent.message_id
+
+async def clean_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handle /clean or /clear [count] to wipe out old messages and reset chat to a clean state.
+    Default count: 40 messages, maximum 100.
+    Deletes old status updates, menus, and user command clutter.
+    """
+    chat = update.effective_chat
+    user = update.effective_user
+    current_msg = update.message
+    current_msg_id = current_msg.message_id if current_msg else None
+
+    count = 40
+    if context.args:
+        try:
+            count = min(max(int(context.args[0]), 5), 100)
+        except ValueError:
+            count = 40
+
+    # Delete the /clean command message itself first if in private chat
+    if current_msg and chat.type == "private":
+        try:
+            await current_msg.delete()
+        except Exception:
+            pass
+
+    deleted_count = 0
+    if current_msg_id:
+        start_id = max(1, current_msg_id - count)
+        msg_ids = list(range(start_id, current_msg_id))
+        
+        # Batch delete via delete_messages
+        try:
+            for i in range(0, len(msg_ids), 100):
+                chunk = msg_ids[i:i+100]
+                await context.bot.delete_messages(chat_id=chat.id, message_ids=chunk)
+                deleted_count += len(chunk)
+        except Exception:
+            # Fallback to individual deletion
+            for mid in reversed(msg_ids):
+                try:
+                    await context.bot.delete_message(chat_id=chat.id, message_id=mid)
+                    deleted_count += 1
+                except Exception:
+                    pass
+
+    # Clear stored tracking IDs in user_data
+    context.user_data.pop("last_remind_msg_id", None)
+    context.user_data.pop("last_menu_id", None)
+
+    clean_notice = (
+        f"🧹 *បានសម្អាតសារចាស់ៗដោយជោគជ័យ!* ✨\n\n"
+        f"ឥឡូវនេះការជជែករបស់អ្នកមានសភាពស្អាតបាត និងគ្មានសារចាស់ៗកកកុញទៀតឡើយ។\n"
+        f"សូមជ្រើសរើសមុខងារដែលចង់ប្រើប្រាស់បន្តខាងក្រោម៖"
+    )
+    sent_menu = await context.bot.send_message(
+        chat_id=chat.id,
+        text=clean_notice,
+        reply_markup=get_main_menu_keyboard(chat.id),
+        parse_mode="Markdown"
+    )
+    context.user_data["last_menu_id"] = sent_menu.message_id
 
 async def aimode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /aimode command to toggle continuous AI chat mode."""
@@ -1251,7 +1394,13 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
             # User specifically requested location identification
             status = await update.message.reply_text("🔍 *កំពុងពិនិត្យមើលស្លាកសញ្ញា សំណង់ និងទីតាំងក្នុងរូបភាព (AI Geolocation)...* 🛰️", parse_mode="Markdown")
             vision_loc = await identify_location_via_vision(img_bytes, caption=caption)
-            await safe_edit_text(status, vision_loc)
+            loc_action_kb = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("🧹 សម្អាតសារ", callback_data="btn_clean_chat"),
+                    InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+                ]
+            ])
+            await safe_edit_text(status, vision_loc, reply_markup=loc_action_kb)
             return
 
         # Check if caption requests image enhancement (HD Upscaler)
@@ -1402,7 +1551,13 @@ async def handle_document_image(update: Update, context: ContextTypes.DEFAULT_TY
         if any(k in caption_lower for k in ["/loc", "/location", "ទីតាំង", "កន្លែង", "ផែនទី", "gps", "where", "location"]):
             status = await update.message.reply_text("🔍 *កំពុងវិភាគទីតាំងក្នុងរូបភាព (AI Geolocation)...* 🛰️", parse_mode="Markdown")
             vision_loc = await identify_location_via_vision(img_bytes, caption=caption)
-            await safe_edit_text(status, vision_loc)
+            loc_action_kb = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("🧹 សម្អាតសារ", callback_data="btn_clean_chat"),
+                    InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+                ]
+            ])
+            await safe_edit_text(status, vision_loc, reply_markup=loc_action_kb)
             return
 
     except Exception as e:
@@ -2051,6 +2206,53 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 reply_markup=get_main_menu_keyboard(chat_id),
                 parse_mode="Markdown"
             )
+
+        elif data == "btn_clean_chat":
+            await query.answer("🧹 កំពុងសម្អាតសារចាស់ៗ...")
+            current_msg_id = query.message.message_id if query.message else None
+            
+            # Delete the message containing the button first
+            try:
+                await query.message.delete()
+            except Exception:
+                pass
+                
+            if current_msg_id:
+                start_id = max(1, current_msg_id - 40)
+                msg_ids = list(range(start_id, current_msg_id))
+                try:
+                    for i in range(0, len(msg_ids), 100):
+                        chunk = msg_ids[i:i+100]
+                        await context.bot.delete_messages(chat_id=chat_id, message_ids=chunk)
+                except Exception:
+                    for mid in reversed(msg_ids):
+                        try:
+                            await context.bot.delete_message(chat_id=chat_id, message_id=mid)
+                        except Exception:
+                            pass
+                            
+            context.user_data.pop("last_remind_msg_id", None)
+            context.user_data.pop("last_menu_id", None)
+
+            clean_notice = (
+                f"🧹 *បានសម្អាតសារចាស់ៗដោយជោគជ័យ!* ✨\n\n"
+                f"ឥឡូវនេះការជជែករបស់អ្នកមានសភាពស្អាតបាត និងគ្មានសារចាស់ៗកកកុញទៀតឡើយ។\n"
+                f"សូមជ្រើសរើសមុខងារដែលចង់ប្រើប្រាស់បន្តខាងក្រោម៖"
+            )
+            sent_menu = await context.bot.send_message(
+                chat_id=chat_id,
+                text=clean_notice,
+                reply_markup=get_main_menu_keyboard(chat_id),
+                parse_mode="Markdown"
+            )
+            context.user_data["last_menu_id"] = sent_menu.message_id
+
+        elif data == "btn_delete_this_msg":
+            try:
+                await query.message.delete()
+                await query.answer("🗑️ បានលុបសារនេះរួចរាល់")
+            except Exception:
+                await query.answer()
     except Exception as e:
         logger.warning(f"Callback error: {e}")
         try:

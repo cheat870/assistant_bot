@@ -114,6 +114,10 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
     elif any(k in norm_text for k in ["រំលឹក"]) or any(k in norm_lower for k in ["reminders", "reminder"]):
         await reminders_command(update, context)
         return
+    elif any(k in norm_text for k in ["សម្អាត", "clean", "clear"]) or norm_lower in ["clean", "/clean", "clear", "/clear"]:
+        from handlers.command_handlers import clean_chat_command
+        await clean_chat_command(update, context)
+        return
     elif any(k in norm_text for k in ["AI Chat", "ai chat"]) or norm_lower in ["ai", "aimode", "/aimode"]:
         await aimode_command(update, context)
         return
@@ -173,11 +177,19 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
             "👉 សូមផ្ញើ Link ពី **TikTok, YouTube, Facebook, Instagram ឬ X** ដើម្បីឱ្យខ្ញុំទាញយកវីដេអូជូន\n"
             "ឬចុច Menu ខាងក្រោមដើម្បីប្រើមុខងារផ្សេងៗ៖"
         )
-        await update.message.reply_text(
+        prev_menu = context.user_data.get("last_menu_id")
+        if prev_menu and chat.type == "private":
+            try:
+                await context.bot.delete_message(chat_id=chat.id, message_id=prev_menu)
+            except Exception:
+                pass
+
+        sent_menu = await update.message.reply_text(
             reply_msg,
             reply_markup=get_main_menu_keyboard(chat.id),
             parse_mode="Markdown"
         )
+        context.user_data["last_menu_id"] = sent_menu.message_id
         return
         
     token = get_or_create_media_token(url)
