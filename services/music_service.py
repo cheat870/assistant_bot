@@ -29,7 +29,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
     is_url = query.startswith("http://") or query.startswith("https://")
     is_sc_url = is_url and "soundcloud.com" in query.lower()
 
-    # YouTube Options: Android player client completely bypasses datacenter bot detection & sign-in checks
+    # YouTube Options: VisionOS & Android player clients completely bypass datacenter bot detection & sign-in checks
     ydl_opts_yt = {
         "format": "bestaudio/best",
         "outtmpl": outtmpl,
@@ -41,7 +41,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         "retries": 1,
         "extractor_args": {
             "youtube": {
-                "player_client": ["android"]
+                "player_client": ["visionos", "android"]
             }
         },
         "postprocessors": postprocessors,
@@ -71,26 +71,29 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"Direct SoundCloud download failed: {e}")
 
-    # Primary Strategy: YouTube with Android player client
-    search_target_yt = query if is_url else f"ytsearch1:{query} audio"
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts_yt) as ydl:
-            info = ydl.extract_info(search_target_yt, download=True)
-            if "entries" in info:
-                valid_entries = [e for e in info.get("entries", []) if e]
-                if valid_entries:
-                    return _process_downloaded_entry(valid_entries[0], temp_dir)
-            elif info:
-                return _process_downloaded_entry(info, temp_dir)
-    except Exception as e_yt:
-        logger.warning(f"YouTube Android search failed ({e_yt}), falling back to SoundCloud...")
+    # Primary Strategy: YouTube with VisionOS & Android player clients
+    # Try direct query first (preserves exact Khmer titles, e.g. 'អស់និស្ស័យ ទេព ពិសិដ្ឋ' or 'the hill')
+    # If not found or fails, try with 'audio' suffix
+    search_queries_yt = [query] if is_url else [f"ytsearch1:{query}", f"ytsearch1:{query} audio"]
+    for search_target_yt in search_queries_yt:
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts_yt) as ydl:
+                info = ydl.extract_info(search_target_yt, download=True)
+                if info and "entries" in info:
+                    valid_entries = [e for e in info.get("entries", []) if e]
+                    if valid_entries:
+                        return _process_downloaded_entry(valid_entries[0], temp_dir)
+                elif info:
+                    return _process_downloaded_entry(info, temp_dir)
+        except Exception as e_yt:
+            logger.warning(f"YouTube search attempt '{search_target_yt}' failed ({e_yt})")
 
     # Secondary Strategy: SoundCloud search fallback
     search_target_sc = query if is_url else f"scsearch1:{query}"
     try:
         with yt_dlp.YoutubeDL(ydl_opts_sc) as ydl:
             info = ydl.extract_info(search_target_sc, download=True)
-            if "entries" in info:
+            if info and "entries" in info:
                 valid_entries = [e for e in info.get("entries", []) if e]
                 if valid_entries:
                     return _process_downloaded_entry(valid_entries[0], temp_dir)
