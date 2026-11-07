@@ -691,6 +691,8 @@ async def song_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_path = res["file_path"]
         dur = int(res.get("duration", 0) or 0)
         
+        await safe_edit_text(status_msg, f"📤 *ទាញយកបានសម្រេច!* កំពុងផ្ញើបទ `{res['title'][:35]}` ទៅ Telegram... 🎶")
+
         caption = (
             f"🎧 *{res['title']}*\n"
             f"👤 *តារាចម្រៀង:* {res['performer']}\n"

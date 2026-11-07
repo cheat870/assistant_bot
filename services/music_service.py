@@ -11,14 +11,13 @@ logger = logging.getLogger(__name__)
 def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
     """
     Search and download high-quality audio with anti-bot bypass.
-    Prioritizes fast multi-threaded SoundCloud search (never blocks datacenter IPs, 5x concurrent downloads)
-    and falls back to mobile-client YouTube.
+    Strategy 1: High-speed YouTube Android player client (fetches official audio in 5-10s without bot check).
+    Strategy 2: Multi-threaded SoundCloud fallback (5 concurrent fragments).
     """
     temp_dir = tempfile.mkdtemp(prefix="song_")
     outtmpl = os.path.join(temp_dir, "%(id)s.%(ext)s")
 
     has_ffmpeg = shutil.which("ffmpeg") is not None
-
     postprocessors = []
     if has_ffmpeg:
         postprocessors.append({
@@ -28,21 +27,9 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         })
 
     is_url = query.startswith("http://") or query.startswith("https://")
-    is_yt_url = is_url and any(yt in query.lower() for yt in ["youtube.com", "youtu.be"])
+    is_sc_url = is_url and "soundcloud.com" in query.lower()
 
-    ydl_opts_sc = {
-        "format": "bestaudio/best",
-        "outtmpl": outtmpl,
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
-        "ignoreerrors": True,
-        "socket_timeout": 15,
-        "retries": 2,
-        "concurrent_fragment_downloads": 5,
-        "postprocessors": postprocessors,
-    }
-
+    # YouTube Options: Android player client completely bypasses datacenter bot detection & sign-in checks
     ydl_opts_yt = {
         "format": "bestaudio/best",
         "outtmpl": outtmpl,
@@ -50,28 +37,56 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         "quiet": True,
         "no_warnings": True,
         "ignoreerrors": True,
-        "socket_timeout": 15,
+        "socket_timeout": 12,
         "retries": 1,
         "extractor_args": {
             "youtube": {
-                "player_client": ["mweb", "ios", "android_creator"]
+                "player_client": ["android"]
             }
         },
         "postprocessors": postprocessors,
     }
 
-    # If it is a direct YouTube link, prioritize YouTube downloader
-    if is_yt_url:
+    # SoundCloud Options: High-speed 5x fragment downloads
+    ydl_opts_sc = {
+        "format": "bestaudio/best",
+        "outtmpl": outtmpl,
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "ignoreerrors": True,
+        "socket_timeout": 12,
+        "retries": 1,
+        "concurrent_fragment_downloads": 5,
+        "postprocessors": postprocessors,
+    }
+
+    # If it is a direct SoundCloud URL, download via SoundCloud
+    if is_sc_url:
         try:
-            with yt_dlp.YoutubeDL(ydl_opts_yt) as ydl:
+            with yt_dlp.YoutubeDL(ydl_opts_sc) as ydl:
                 info = ydl.extract_info(query, download=True)
                 entry = info["entries"][0] if "entries" in info and info["entries"] else info
                 return _process_downloaded_entry(entry, temp_dir)
         except Exception as e:
-            logger.warning(f"Direct YouTube download failed: {e}")
+            logger.warning(f"Direct SoundCloud download failed: {e}")
 
-    # Primary Strategy for Search: SoundCloud (instant 5-8s download, never challenges datacenter IPs)
-    search_target_sc = query if is_url else f"scsearch3:{query}"
+    # Primary Strategy: YouTube with Android player client
+    search_target_yt = query if is_url else f"ytsearch1:{query} audio"
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts_yt) as ydl:
+            info = ydl.extract_info(search_target_yt, download=True)
+            if "entries" in info:
+                valid_entries = [e for e in info.get("entries", []) if e]
+                if valid_entries:
+                    return _process_downloaded_entry(valid_entries[0], temp_dir)
+            elif info:
+                return _process_downloaded_entry(info, temp_dir)
+    except Exception as e_yt:
+        logger.warning(f"YouTube Android search failed ({e_yt}), falling back to SoundCloud...")
+
+    # Secondary Strategy: SoundCloud search fallback
+    search_target_sc = query if is_url else f"scsearch1:{query}"
     try:
         with yt_dlp.YoutubeDL(ydl_opts_sc) as ydl:
             info = ydl.extract_info(search_target_sc, download=True)
@@ -82,28 +97,14 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
             elif info:
                 return _process_downloaded_entry(info, temp_dir)
     except Exception as e_sc:
-        logger.warning(f"SoundCloud search failed ({e_sc}), falling back to YouTube...")
+        logger.error(f"SoundCloud fallback also failed: {e_sc}")
 
-    # Secondary Strategy: YouTube search with mobile client bypass
-    search_target_yt = query if is_url else f"ytsearch1:{query}"
+    # Clean up temp dir if all strategies failed
     try:
-        with yt_dlp.YoutubeDL(ydl_opts_yt) as ydl:
-            info = ydl.extract_info(search_target_yt, download=True)
-            if "entries" in info:
-                if not info["entries"]:
-                    raise ValueError("រកមិនឃើញបទចម្រៀងដែលអ្នកចង់បានឡើយ")
-                entry = info["entries"][0]
-            else:
-                entry = info
-
-            return _process_downloaded_entry(entry, temp_dir)
-    except Exception as e_yt:
-        logger.error(f"YouTube search fallback also failed: {e_yt}")
-        try:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        except Exception:
-            pass
-        raise ValueError("មិនអាចទាញយកបទចម្រៀងនេះបានទេ។ សូមសាកល្បងវាយឈ្មោះបទ ឬឈ្មោះតារាចម្រៀងម្តងទៀត។")
+        shutil.rmtree(temp_dir, ignore_errors=True)
+    except Exception:
+        pass
+    raise ValueError("រកមិនឃើញបទចម្រៀងដែលអ្នកចង់បានឡើយ។ សូមសាកល្បងវាយឈ្មោះបទ ឬឈ្មោះតារាចម្រៀងឱ្យកាន់តែច្បាស់។")
 
 def _process_downloaded_entry(entry: Dict[str, Any], temp_dir: str) -> Dict[str, Any]:
     """Helper to locate downloaded file and package metadata."""
@@ -130,7 +131,7 @@ def _process_downloaded_entry(entry: Dict[str, Any], temp_dir: str) -> Dict[str,
         "temp_dir": temp_dir,
         "title": title,
         "performer": uploader,
-        "duration": duration,
+        "duration": dur_sec,
         "duration_str": duration_min,
         "thumbnail": thumbnail,
         "url": webpage_url
