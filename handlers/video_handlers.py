@@ -81,33 +81,43 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 logger.warning(f"Failed to auto-delete spam: {e}")
             return
 
-    # 2. Quick routing for persistent bottom keyboard buttons
+    # 2. Quick routing for persistent bottom keyboard buttons & friendly text triggers
     clean_text = text.strip()
-    if clean_text in ["🏠 ផ្ទាំង Menu មេ", "Menu", "មឺនុយ", "ផ្ទាំងដើម"]:
+    norm_text = clean_text.replace("\ufe0f", "").replace("\ufe0e", "").replace("\u200b", "").strip()
+    norm_lower = norm_text.lower()
+
+    if any(k in norm_text for k in ["ផ្ទាំង Menu", "Menu", "មឺនុយ", "ផ្ទាំងដើម"]) or norm_lower in ["menu", "/menu", "start", "/start"]:
         await start_command(update, context)
         return
-    elif clean_text in ["📊 ចំណូល-ចំណាយ", "ចំណូល-ចំណាយ", "ចំណាយ", "budget"]:
+    elif any(k in norm_text for k in ["ចំណូល-ចំណាយ", "ចំណាយ", "ចំណូល"]) or norm_lower in ["budget", "/budget"]:
+        # If it's a specific transaction (has numbers/currencies), let step 3 parse it
+        parsed_exp = parse_expense_text(text)
+        if parsed_exp:
+            record_transaction(chat.id, parsed_exp)
+            msg = format_record_success(parsed_exp)
+            await safe_reply_text(update.message, msg)
+            return
         await budget_command(update, context)
         return
-    elif clean_text in ["📰 ព័ត៌មានពេលព្រឹក", "ព័ត៌មានពេលព្រឹក", "ព័ត៌មាន", "news"]:
+    elif "ព័ត៌មាន" in norm_text or norm_lower in ["news", "/news"]:
         await news_command(update, context)
         return
-    elif clean_text in ["🌤️ អាកាសធាតុ", "អាកាសធាតុ", "weather"]:
+    elif "អាកាសធាតុ" in norm_text or norm_lower in ["weather", "/weather"]:
         await weather_command(update, context)
         return
-    elif clean_text in ["🗓️ ប្រតិទិនបុណ្យជាតិ", "ប្រតិទិនបុណ្យជាតិ", "បុណ្យជាតិ", "calendar"]:
+    elif any(k in norm_text for k in ["ប្រតិទិន", "បុណ្យជាតិ"]) or norm_lower in ["calendar", "/calendar", "holidays", "/holidays"]:
         await calendar_command(update, context)
         return
-    elif clean_text in ["💰 សេដ្ឋកិច្ច/មាស/សាំង", "សេដ្ឋកិច្ច/មាស/សាំង", "សេដ្ឋកិច្ច", "finance"]:
+    elif any(k in norm_text for k in ["សេដ្ឋកិច្ច", "មាស", "សាំង", "អត្រាប្តូរប្រាក់"]) or norm_lower in ["finance", "/finance", "rate", "/rate"]:
         await finance_command(update, context)
         return
-    elif clean_text in ["⏰ Reminders", "Reminders", "រំលឹក"]:
+    elif any(k in norm_text for k in ["រំលឹក"]) or any(k in norm_lower for k in ["reminders", "reminder"]):
         await reminders_command(update, context)
         return
-    elif clean_text in ["✨ AI Chat", "AI Chat", "ai"]:
+    elif any(k in norm_text for k in ["AI Chat", "ai chat"]) or norm_lower in ["ai", "aimode", "/aimode"]:
         await aimode_command(update, context)
         return
-    elif clean_text in ["📥 របៀបទាញយក", "របៀបទាញយក"]:
+    elif any(k in norm_text for k in ["របៀបទាញយក", "របៀបប្រើ", "ជំនួយ"]) or norm_lower in ["help", "/help"]:
         help_msg = (
             "📥 *របៀបទាញយកវីដេអូ & MP3 & Cover HD៖*\n\n"
             "1. ចូលទៅកាន់ TikTok, YouTube, Facebook, Instagram ឬ X/Twitter\n"

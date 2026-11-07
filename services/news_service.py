@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import time
 import xml.etree.ElementTree as ET
 import httpx
 from typing import List, Dict, Any, Optional
@@ -11,11 +12,18 @@ logger = logging.getLogger(__name__)
 CAMBODIA_RSS = "https://news.google.com/rss/search?q=Cambodia&hl=en-US&gl=US&ceid=US:en"
 TECH_RSS = "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en"
 
+_cached_news_digest: Optional[str] = None
+_cached_news_time: float = 0.0
+NEWS_CACHE_TTL = 1200.0  # 20 minutes cache
+
 def _fetch_rss_items(url: str, limit: int = 3) -> List[Dict[str, str]]:
-    """Synchronous RSS parser."""
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    """Synchronous RSS parser with browser headers."""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/rss+xml, application/xml, text/xml, */*"
+    }
     try:
-        with httpx.Client(timeout=10.0, follow_redirects=True) as client:
+        with httpx.Client(timeout=12.0, follow_redirects=True) as client:
             resp = client.get(url, headers=headers)
             resp.raise_for_status()
             root = ET.fromstring(resp.content)
@@ -47,8 +55,16 @@ async def fetch_morning_headlines() -> Dict[str, List[Dict[str, str]]]:
         "tech": tech_news
     }
 
-async def generate_morning_news_digest() -> str:
-    """Generate 7:00 AM Cambodia and Tech news digest in Khmer."""
+async def generate_morning_news_digest(force_refresh: bool = False) -> str:
+    """Generate 7:00 AM Cambodia and Tech news digest in Khmer with caching and AI summary."""
+    global _cached_news_digest, _cached_news_time
+
+    # Return cached digest if available and fresh
+    now_ts = time.time()
+    if not force_refresh and _cached_news_digest and (now_ts - _cached_news_time < NEWS_CACHE_TTL):
+        logger.info("Returning cached morning news digest.")
+        return _cached_news_digest
+
     headlines_data = await fetch_morning_headlines()
     cam_items = headlines_data["cambodia"]
     tech_items = headlines_data["tech"]
@@ -88,12 +104,11 @@ async def generate_morning_news_digest() -> str:
                 f"and include the date ({date_str}). Keep it engaging, easy to read on mobile, and polite.\n\n"
                 f"{raw_text}"
             )
-            # Fast AI summary with 5-second timeout; fallback immediately to clean digest if AI is busy
             resp = await asyncio.wait_for(
                 asyncio.to_thread(_call_gemini_api, client, ai_prompt),
-                timeout=5.0
+                timeout=15.0
             )
-            return (
+            result = (
                 f"🌅 *ព្រឹត្តិបត្រព័ត៌មានពេលព្រឹក ៧:០០ AM*\n"
                 f"📅 កាលបរិច្ឆេទ៖ {date_str}\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -101,6 +116,9 @@ async def generate_morning_news_digest() -> str:
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"💡 _ប្រើពាក្យបញ្ជា_ `/weather` _ដើម្បីពិនិត្យអាកាសធាតុ ឬ_ `/finance` _ដើម្បីពិនិត្យអត្រាប្តូរប្រាក់!_"
             )
+            _cached_news_digest = result
+            _cached_news_time = now_ts
+            return result
         except Exception as e:
             logger.warning(f"Could not summarize news with AI (timeout/demand spike): {e}")
 
@@ -123,4 +141,6 @@ async def generate_morning_news_digest() -> str:
 
     msg += "━━━━━━━━━━━━━━━━━━━━━━\n"
     msg += "💡 _ប្រើពាក្យបញ្ជា_ `/weather` _ដើម្បីពិនិត្យអាកាសធាតុ ឬ_ `/rate` _ដើម្បីពិនិត្យអត្រាប្តូរប្រាក់!_"
+    _cached_news_digest = msg
+    _cached_news_time = now_ts
     return msg

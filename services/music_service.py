@@ -9,7 +9,11 @@ import yt_dlp
 logger = logging.getLogger(__name__)
 
 def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
-    """Search YouTube or SoundCloud for query and download high-quality audio with anti-bot bypass."""
+    """
+    Search and download high-quality audio with anti-bot bypass.
+    Prioritizes fast multi-threaded SoundCloud search (never blocks datacenter IPs, 5x concurrent downloads)
+    and falls back to mobile-client YouTube.
+    """
     temp_dir = tempfile.mkdtemp(prefix="song_")
     outtmpl = os.path.join(temp_dir, "%(id)s.%(ext)s")
 
@@ -23,43 +27,9 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
             "preferredquality": "320",
         })
 
-    # Strategy 1: YouTube with mobile & embedded player clients to bypass datacenter bot detection
-    ydl_opts_yt = {
-        "format": "bestaudio/best",
-        "outtmpl": outtmpl,
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
-        "socket_timeout": 15,
-        "retries": 2,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android", "ios", "web_embedded"]
-            }
-        },
-        "postprocessors": postprocessors,
-    }
+    is_url = query.startswith("http://") or query.startswith("https://")
+    is_yt_url = is_url and any(yt in query.lower() for yt in ["youtube.com", "youtu.be"])
 
-    last_err = None
-    search_target_yt = query if query.startswith("http://") or query.startswith("https://") else f"ytsearch1:{query}"
-    
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts_yt) as ydl:
-            info = ydl.extract_info(search_target_yt, download=True)
-            if "entries" in info:
-                if not info["entries"]:
-                    raise ValueError("រកមិនឃើញបទចម្រៀងដែលអ្នកចង់បាននៅលើ YouTube ឡើយ")
-                entry = info["entries"][0]
-            else:
-                entry = info
-
-            return _process_downloaded_entry(entry, temp_dir)
-    except Exception as e:
-        logger.warning(f"YouTube download failed ({e}), falling back to SoundCloud search...")
-        last_err = e
-
-    # Strategy 2: SoundCloud Fallback (Never blocks datacenter IPs)
-    search_target_sc = query if query.startswith("http://") or query.startswith("https://") else f"scsearch1:{query}"
     ydl_opts_sc = {
         "format": "bestaudio/best",
         "outtmpl": outtmpl,
@@ -68,12 +38,55 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         "no_warnings": True,
         "socket_timeout": 15,
         "retries": 2,
+        "concurrent_fragment_downloads": 5,
         "postprocessors": postprocessors,
     }
 
+    ydl_opts_yt = {
+        "format": "bestaudio/best",
+        "outtmpl": outtmpl,
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "socket_timeout": 15,
+        "retries": 1,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["mweb", "ios", "android_creator"]
+            }
+        },
+        "postprocessors": postprocessors,
+    }
+
+    # If it is a direct YouTube link, prioritize YouTube downloader
+    if is_yt_url:
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts_yt) as ydl:
+                info = ydl.extract_info(query, download=True)
+                entry = info["entries"][0] if "entries" in info and info["entries"] else info
+                return _process_downloaded_entry(entry, temp_dir)
+        except Exception as e:
+            logger.warning(f"Direct YouTube download failed: {e}")
+
+    # Primary Strategy for Search: SoundCloud (instant 5-8s download, never challenges datacenter IPs)
+    search_target_sc = query if is_url else f"scsearch1:{query}"
     try:
         with yt_dlp.YoutubeDL(ydl_opts_sc) as ydl:
             info = ydl.extract_info(search_target_sc, download=True)
+            if "entries" in info:
+                if info["entries"]:
+                    entry = info["entries"][0]
+                    return _process_downloaded_entry(entry, temp_dir)
+            elif info:
+                return _process_downloaded_entry(info, temp_dir)
+    except Exception as e_sc:
+        logger.warning(f"SoundCloud search failed ({e_sc}), falling back to YouTube...")
+
+    # Secondary Strategy: YouTube search with mobile client bypass
+    search_target_yt = query if is_url else f"ytsearch1:{query}"
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts_yt) as ydl:
+            info = ydl.extract_info(search_target_yt, download=True)
             if "entries" in info:
                 if not info["entries"]:
                     raise ValueError("រកមិនឃើញបទចម្រៀងដែលអ្នកចង់បានឡើយ")
@@ -82,14 +95,13 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
                 entry = info
 
             return _process_downloaded_entry(entry, temp_dir)
-    except Exception as e_sc:
-        logger.error(f"SoundCloud fallback also failed: {e_sc}")
-        # Clean up temp dir if failed
+    except Exception as e_yt:
+        logger.error(f"YouTube search fallback also failed: {e_yt}")
         try:
             shutil.rmtree(temp_dir, ignore_errors=True)
         except Exception:
             pass
-        raise last_err or e_sc
+        raise ValueError("មិនអាចទាញយកបទចម្រៀងនេះបានទេ។ សូមសាកល្បងវាយឈ្មោះបទ ឬឈ្មោះតារាចម្រៀងម្តងទៀត។")
 
 def _process_downloaded_entry(entry: Dict[str, Any], temp_dir: str) -> Dict[str, Any]:
     """Helper to locate downloaded file and package metadata."""
@@ -108,7 +120,8 @@ def _process_downloaded_entry(entry: Dict[str, Any], temp_dir: str) -> Dict[str,
         raise FileNotFoundError("បរាជ័យក្នុងការទាញយក file សំឡេង")
 
     audio_file = downloaded_files[0]
-    duration_min = f"{duration // 60}:{duration % 60:02d}" if duration else "Unknown"
+    dur_sec = int(duration) if duration else 0
+    duration_min = f"{dur_sec // 60}:{dur_sec % 60:02d}" if dur_sec else "Unknown"
 
     return {
         "file_path": audio_file,
@@ -122,10 +135,10 @@ def _process_downloaded_entry(entry: Dict[str, Any], temp_dir: str) -> Dict[str,
     }
 
 async def download_song(query: str) -> Dict[str, Any]:
-    """Async wrapper to search and download song audio with strict 35-second timeout."""
+    """Async wrapper to search and download song audio with generous 75-second timeout."""
     return await asyncio.wait_for(
         asyncio.to_thread(_search_and_download_song_sync, query),
-        timeout=35.0
+        timeout=75.0
     )
 
 def _identify_tiktok_sound_sync(url: str) -> Dict[str, Any]:
@@ -157,5 +170,5 @@ async def identify_tiktok_sound(url: str) -> Dict[str, Any]:
     """Async wrapper to extract audio metadata."""
     return await asyncio.wait_for(
         asyncio.to_thread(_identify_tiktok_sound_sync, url),
-        timeout=20.0
+        timeout=25.0
     )

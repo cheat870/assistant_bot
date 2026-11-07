@@ -234,8 +234,8 @@ def main():
     print("\n✅ Bot ដំណើរការរួចរាល់ហើយ! (Bot is running via polling...)")
     print("👉 ចូល Telegram រួចវាយពាក្យ /start ដើម្បីសាកល្បង។\n")
     
-    # Start Polling
-    app.run_polling(drop_pending_updates=True)
+    # Start Polling (preserve pending updates so messages sent during restart/sleep are not lost)
+    app.run_polling(drop_pending_updates=False)
 
 if __name__ == "__main__":
     main()
