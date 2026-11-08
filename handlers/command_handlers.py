@@ -172,7 +172,7 @@ def get_main_menu_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     
     from database import is_auto_clean_enabled
     auto_clean_active = is_auto_clean_enabled(chat_id)
-    auto_clean_text = "🧹 Auto-Clean 20m: ✅" if auto_clean_active else "🧹 Auto-Clean 20m: ❌"
+    auto_clean_text = "🧹 Auto-Clean (3AM/12PM): ✅" if auto_clean_active else "🧹 Auto-Clean (3AM/12PM): ❌"
 
     keyboard = [
         [
@@ -585,7 +585,7 @@ async def clean_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data["last_menu_id"] = sent_menu.message_id
 
 async def autoclean_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Toggle 20-minute auto-delete: /autoclean."""
+    """Toggle twice-daily auto-clean (3:00 AM & 12:00 PM): /autoclean."""
     chat_id = update.effective_chat.id
     from database import is_auto_clean_enabled, set_auto_clean_enabled
     current = is_auto_clean_enabled(chat_id)
@@ -594,13 +594,16 @@ async def autoclean_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if new_state:
         msg = (
-            "🧹 *បានបើកមុខងារ Auto-Delete រាល់ ២០ នាទី!* ✅\n\n"
-            "រាល់សារចាស់ៗដែលបានផ្ញើលើសពី ២០ នាទី នឹងត្រូវ Bot លុបចោលដោយស្វ័យប្រវត្តជានិច្ច ដើម្បីរក្សា Chat ឱ្យស្អាតស្រឡះជានិច្ច។"
+            "🧹 *បានបើកមុខងារ Auto-Clean History (3AM & 12PM)!* ✅\n\n"
+            "Bot នឹងសម្អាតប្រវត្តិសារទាំងអស់ដោយស្វ័យប្រវត្ត ២ ដងក្នុងមួយថ្ងៃ៖\n"
+            "• ⏰ **ម៉ោង ៣:០០ ព្រឹក** (ម៉ោងនៅកម្ពុជា)\n"
+            "• ⏰ **ម៉ោង ១២:០០ ថ្ងៃត្រង់** (ម៉ោងនៅកម្ពុជា)\n\n"
+            "ជួយឱ្យការជជែករបស់អ្នកមានសភាពស្អាតស្រឡះជានិច្ច និងគ្មានសារចាស់ៗកកកុញឡើយ។"
         )
     else:
         msg = (
-            "🔕 *បានបិទមុខងារ Auto-Delete រាល់ ២០ នាទី!* ❌\n\n"
-            "សារនឹងមិនត្រូវលុបស្វ័យប្រវត្តរាល់ ២០ នាទីទៀតឡើយ។"
+            "🔕 *បានបិទមុខងារ Auto-Clean History!* ❌\n\n"
+            "សារនឹងមិនត្រូវសម្អាតស្វ័យប្រវត្តនៅម៉ោង ៣:០០ ព្រឹក និង ១២:០០ ថ្ងៃត្រង់ទៀតឡើយ។"
         )
     await send_clean_response(update, context, msg, reply_markup=get_back_keyboard())
 
@@ -2340,7 +2343,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             current = is_auto_clean_enabled(chat_id)
             new_state = not current
             set_auto_clean_enabled(chat_id, new_state)
-            status_alert = "✅ បានបើក Auto-Clean រាល់ ២០ នាទី!" if new_state else "❌ បានបិទ Auto-Clean រាល់ ២០ នាទី!"
+            status_alert = "✅ បានបើក Auto-Clean (៣:០០ ព្រឹក & ១២:០០ ថ្ងៃ)!" if new_state else "❌ បានបិទ Auto-Clean (៣:០០ ព្រឹក & ១២:០០ ថ្ងៃ)!"
             await query.answer(status_alert)
             first_name = user.first_name if user else "លោកអ្នក"
             await query.edit_message_text(

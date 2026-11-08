@@ -12,6 +12,10 @@ from config import (
     ALERT_MINUTE,
     WEATHER_ALERT_HOUR,
     WEATHER_ALERT_MINUTE,
+    AUTO_CLEAN_MORNING_HOUR,
+    AUTO_CLEAN_MORNING_MINUTE,
+    AUTO_CLEAN_NOON_HOUR,
+    AUTO_CLEAN_NOON_MINUTE,
 )
 from database import (
     get_active_subscribers,
@@ -20,6 +24,10 @@ from database import (
     mark_reminder_done,
     get_expired_auto_clean_messages,
     delete_auto_clean_message_records,
+    get_all_auto_clean_chats,
+    get_auto_clean_messages_for_chat,
+    clear_auto_clean_messages_for_chat,
+    record_auto_clean_message,
 )
 from services.holiday_calendar import get_today_holiday, format_alert_message
 from services.weather_service import fetch_weather, format_weather_message
@@ -160,10 +168,83 @@ async def check_reminders_job(context):
         except Exception as e:
             logger.warning(f"Failed to deliver reminder {rem['id']}: {e}")
 
+async def scheduled_clear_history_job(context):
+    """
+    Scheduled job executed twice daily at 3:00 AM and 12:00 PM (Asia/Phnom_Penh).
+    Clears all chat history for all registered chats that have auto-clean enabled.
+    """
+    logger.info("Executing scheduled twice-daily chat history clean (3:00 AM / 12:00 PM)...")
+    try:
+        active_chats = get_all_auto_clean_chats()
+        if not active_chats:
+            logger.info("No active auto-clean chats found.")
+            return
+
+        from handlers.command_handlers import get_main_menu_keyboard
+
+        cleaned_chats = 0
+        for chat_id in active_chats:
+            try:
+                # 1. Fetch tracked messages for this chat
+                records = get_auto_clean_messages_for_chat(chat_id)
+                tracked_mids = [r[1] for r in records]
+
+                # 2. Delete tracked messages
+                for mid in tracked_mids:
+                    try:
+                        await context.application.bot.delete_message(chat_id=chat_id, message_id=mid)
+                    except Exception:
+                        pass
+
+                # 3. Sweep backward up to 60 messages from highest known ID to clear untracked user/bot messages
+                highest_id = max(tracked_mids) if tracked_mids else None
+                if highest_id:
+                    sweep_ids = [mid for mid in range(max(1, highest_id - 60), highest_id + 1) if mid not in tracked_mids]
+                    for mid in reversed(sweep_ids):
+                        try:
+                            await context.application.bot.delete_message(chat_id=chat_id, message_id=mid)
+                        except Exception:
+                            pass
+
+                # 4. Clear records from database
+                clear_auto_clean_messages_for_chat(chat_id)
+
+                # 5. Clear application user_data tracking for this chat if available
+                if hasattr(context.application, "user_data") and chat_id in context.application.user_data:
+                    context.application.user_data[chat_id].pop("last_bot_msg_id", None)
+                    context.application.user_data[chat_id].pop("last_menu_id", None)
+                    context.application.user_data[chat_id].pop("last_remind_msg_id", None)
+
+                # 6. Send a fresh main menu so user is greeted with a clean screen
+                notice_text = (
+                    "🧹 *ការសម្អាតប្រវត្តិសារស្វ័យប្រវត្តិ (Auto-Clean History)* ✨\n\n"
+                    "ប្រព័ន្ធបានសម្អាតប្រវត្តិសារទាំងអស់ដោយស្វ័យប្រវត្ត (តាមកាលវិភាគម៉ោង ៣:០០ ព្រឹក និង ១២:០០ ថ្ងៃត្រង់)។\n"
+                    "ការជជែករបស់អ្នកឥឡូវនេះមានសភាពស្អាតស្រឡះជានិច្ច! 🌿\n\n"
+                    "សូមជ្រើសរើសមុខងារដែលចង់ប្រើប្រាស់បន្តខាងក្រោម៖"
+                )
+                sent_menu = await context.application.bot.send_message(
+                    chat_id=chat_id,
+                    text=notice_text,
+                    reply_markup=get_main_menu_keyboard(chat_id),
+                    parse_mode="Markdown"
+                )
+                record_auto_clean_message(chat_id, sent_menu.message_id)
+                if hasattr(context.application, "user_data") and chat_id in context.application.user_data:
+                    context.application.user_data[chat_id]["last_bot_msg_id"] = sent_menu.message_id
+                    context.application.user_data[chat_id]["last_menu_id"] = sent_menu.message_id
+
+                cleaned_chats += 1
+                await asyncio.sleep(0.05)  # Rate limit protection
+            except Exception as e:
+                logger.warning(f"Failed to clear history for chat {chat_id}: {e}")
+
+        logger.info(f"Twice-daily chat history clean completed for {cleaned_chats}/{len(active_chats)} chats.")
+    except Exception as e:
+        logger.error(f"Error in scheduled_clear_history_job: {e}")
+
 async def check_auto_clean_job(context):
     """
-    Check and auto-delete messages that are older than 20 minutes.
-    Executes 'រាល់ ២០នាទី វានឹង delete auto' automatically.
+    Check and auto-delete messages that are older than 20 minutes (retained for compatibility).
     """
     try:
         now_utc = datetime.utcnow()
@@ -186,7 +267,7 @@ async def check_auto_clean_job(context):
         logger.warning(f"Error in check_auto_clean_job: {e}")
 
 def setup_scheduler(app: Application):
-    """Set up the daily 4:00 AM holiday, 5:00 AM weather alerts, 7:00 AM news, reminders, and 20-min auto-delete."""
+    """Set up the daily 4:00 AM holiday, 5:00 AM weather alerts, 7:00 AM news, reminders, and twice-daily 3AM/12PM auto-clean."""
     job_queue = app.job_queue
     if not job_queue:
         logger.warning("JobQueue is not enabled in Application.")
@@ -228,11 +309,17 @@ def setup_scheduler(app: Application):
     )
     logger.info("Registered custom reminders checker job (every 60s).")
 
-    # 5. 20-Minute Auto-Delete Watcher: Check every 60 seconds for messages >= 20m old
-    job_queue.run_repeating(
-        check_auto_clean_job,
-        interval=60,
-        first=15,
-        name="auto_clean_expired_messages"
+    # 5. Scheduled Twice-Daily Auto-Clean: 3:00 AM & 12:00 PM (Asia/Phnom_Penh)
+    clean_3am_time = time(hour=AUTO_CLEAN_MORNING_HOUR, minute=AUTO_CLEAN_MORNING_MINUTE, tzinfo=BOT_TIMEZONE)
+    clean_12pm_time = time(hour=AUTO_CLEAN_NOON_HOUR, minute=AUTO_CLEAN_NOON_MINUTE, tzinfo=BOT_TIMEZONE)
+    job_queue.run_daily(
+        scheduled_clear_history_job,
+        time=clean_3am_time,
+        name="daily_3am_history_clean"
     )
-    logger.info("Registered 20-minute auto-delete watcher job.")
+    job_queue.run_daily(
+        scheduled_clear_history_job,
+        time=clean_12pm_time,
+        name="daily_12pm_history_clean"
+    )
+    logger.info(f"Registered twice-daily chat auto-clean at 3:00 AM and 12:00 PM ({BOT_TIMEZONE}).")

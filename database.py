@@ -409,7 +409,7 @@ def clear_chat_history(chat_id: int):
     conn.close()
 
 def get_all_registered_chats() -> List[int]:
-    """Get all unique chat IDs across subscribers, reminders and settings for admin broadcast."""
+    """Get all unique chat IDs across subscribers, reminders, settings and auto-clean."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
@@ -421,6 +421,10 @@ def get_all_registered_chats() -> List[int]:
             SELECT chat_id FROM ai_sessions
             UNION
             SELECT chat_id FROM expenses
+            UNION
+            SELECT chat_id FROM auto_clean_settings
+            UNION
+            SELECT chat_id FROM auto_clean_messages
         )
     """)
     rows = cursor.fetchall()
@@ -658,10 +662,10 @@ def clear_pdf_session(chat_id: int) -> bool:
     return True
 
 # -------------------------------------------------------------
-# 20-Minute Auto-Delete & Periodic Cleaner Operations
+# Scheduled Twice-Daily Auto-Clean & History Management Operations
 # -------------------------------------------------------------
 def record_auto_clean_message(chat_id: int, message_id: int):
-    """Record a message for the 20-minute auto-delete cycle."""
+    """Record a message for the twice-daily auto-clean cycle (3AM & 12PM)."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
@@ -699,7 +703,7 @@ def delete_auto_clean_message_records(record_ids: List[int]):
     conn.close()
 
 def is_auto_clean_enabled(chat_id: int) -> bool:
-    """Check if 20-minute auto-delete is enabled for this chat (defaults to True)."""
+    """Check if scheduled auto-clean (3AM & 12PM) is enabled for this chat (defaults to True)."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT is_enabled FROM auto_clean_settings WHERE chat_id = ?", (chat_id,))
@@ -708,16 +712,45 @@ def is_auto_clean_enabled(chat_id: int) -> bool:
     return bool(row[0] == 1) if row else True
 
 def set_auto_clean_enabled(chat_id: int, enabled: bool):
-    """Enable or disable 20-minute auto-delete for this chat."""
+    """Enable or disable scheduled auto-clean for this chat."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO auto_clean_settings (chat_id, is_enabled, clean_interval_minutes, updated_at)
-        VALUES (?, ?, 20, ?)
+        VALUES (?, ?, 0, ?)
         ON CONFLICT(chat_id) DO UPDATE SET
             is_enabled = excluded.is_enabled,
             updated_at = excluded.updated_at
     """, (chat_id, 1 if enabled else 0, datetime.utcnow().isoformat()))
+    conn.commit()
+    conn.close()
+
+def get_all_auto_clean_chats() -> List[int]:
+    """Retrieve all chat IDs that have scheduled auto-clean enabled."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    all_chats = get_all_registered_chats()
+    cursor.execute("SELECT chat_id FROM auto_clean_settings WHERE is_enabled = 0")
+    disabled_chats = set(r[0] for r in cursor.fetchall())
+    conn.close()
+    return [c for c in all_chats if c not in disabled_chats]
+
+def get_auto_clean_messages_for_chat(chat_id: int) -> List[Tuple[int, int]]:
+    """Retrieve all recorded messages for a specific chat (id, message_id)."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, message_id FROM auto_clean_messages WHERE chat_id = ? ORDER BY id ASC
+    """, (chat_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def clear_auto_clean_messages_for_chat(chat_id: int):
+    """Remove all message tracking records for a specific chat."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM auto_clean_messages WHERE chat_id = ?", (chat_id,))
     conn.commit()
     conn.close()
 

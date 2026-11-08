@@ -332,35 +332,58 @@ def test_clean_chat_and_auto_cleanup():
     inline_callbacks = [btn.callback_data for row in main_kb.inline_keyboard for btn in row if btn.callback_data]
     assert "btn_clean_chat" in inline_callbacks, "Main menu keyboard must contain btn_clean_chat"
     assert "btn_toggle_autoclean" in inline_callbacks, "Main menu keyboard must contain btn_toggle_autoclean"
-    print("  - Main menu keyboard contains 'btn_clean_chat' and 'btn_toggle_autoclean' callbacks: OK")
+    
+    # Check button text for 3AM & 12PM schedule
+    autoclean_btn_text = [btn.text for row in main_kb.inline_keyboard for btn in row if "Auto-Clean" in (btn.text or "")]
+    assert any("3AM/12PM" in t for t in autoclean_btn_text), f"Button should mention 3AM/12PM: {autoclean_btn_text}"
+    print("  - Main menu keyboard contains 'Auto-Clean (3AM/12PM)' callback: OK")
 
-    # Test 20-minute auto-clean database logic
+    # Test auto-clean database logic (3AM & 12PM scheduled auto-clean)
     from database import (
         record_auto_clean_message,
         get_expired_auto_clean_messages,
         delete_auto_clean_message_records,
         is_auto_clean_enabled,
         set_auto_clean_enabled,
+        get_all_auto_clean_chats,
+        get_auto_clean_messages_for_chat,
+        clear_auto_clean_messages_for_chat,
     )
-    from datetime import datetime, timedelta
+    from datetime import datetime, timezone, timedelta
 
     test_chat = 999888
     set_auto_clean_enabled(test_chat, True)
     assert is_auto_clean_enabled(test_chat) is True
 
     record_auto_clean_message(test_chat, 1001)
-    # Check with future cutoff (simulating 21 minutes later)
-    future_cutoff = (datetime.utcnow() + timedelta(minutes=5)).isoformat()
+    record_auto_clean_message(test_chat, 1002)
+    
+    # Test chat-specific auto-clean query
+    chat_msgs = get_auto_clean_messages_for_chat(test_chat)
+    assert any(m[1] == 1001 for m in chat_msgs), "Must retrieve recorded message 1001"
+    assert any(m[1] == 1002 for m in chat_msgs), "Must retrieve recorded message 1002"
+    
+    # Check active auto-clean chats
+    auto_chats = get_all_auto_clean_chats()
+    assert test_chat in auto_chats, "Test chat should be in active auto-clean chats"
+    
+    # Clear for chat
+    clear_auto_clean_messages_for_chat(test_chat)
+    chat_msgs_after = get_auto_clean_messages_for_chat(test_chat)
+    assert len(chat_msgs_after) == 0, "Chat messages should be cleared"
+
+    # Also test cutoff-based expiry for compatibility
+    record_auto_clean_message(test_chat, 2001)
+    future_cutoff = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
     expired = get_expired_auto_clean_messages(future_cutoff)
-    matching = [e for e in expired if e[1] == test_chat and e[2] == 1001]
+    matching = [e for e in expired if e[1] == test_chat and e[2] == 2001]
     assert len(matching) == 1, "Must find recorded message when past cutoff"
     
-    # Delete record
     delete_auto_clean_message_records([matching[0][0]])
     expired_after = get_expired_auto_clean_messages(future_cutoff)
-    assert not any(e[1] == test_chat and e[2] == 1001 for e in expired_after)
-    print("  - 20-minute auto-delete database pipeline: OK")
-    print("  [OK] Chat Cleaner & 20-Minute Auto-Delete verified!")
+    assert not any(e[1] == test_chat and e[2] == 2001 for e in expired_after)
+    print("  - Twice-daily (3AM & 12PM) auto-clean database pipeline: OK")
+    print("  [OK] Chat Cleaner & Twice-Daily Auto-Clean verified!")
 
 if __name__ == "__main__":
     test_holiday_calendar()
