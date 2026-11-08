@@ -637,6 +637,56 @@ async def aimode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
+async def memory_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """View stored Long-Term Memories & User Profile: /memory."""
+    chat_id = update.effective_chat.id
+    from services.memory_service import format_user_memory_display
+    msg = format_user_memory_display(chat_id)
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🗑️ លុបការចងចាំទាំងអស់ (/forget)", callback_data="btn_clear_longterm_memory")],
+        [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+    ])
+    await send_clean_response(update, context, msg, reply_markup=kb)
+
+async def forget_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Clear all stored Long-Term Memories: /forget."""
+    chat_id = update.effective_chat.id
+    from database import clear_user_memories
+    from services.cache_service import cache_delete
+    count = clear_user_memories(chat_id)
+    cache_delete(f"mem_prompt_{chat_id}")
+    msg = (
+        f"🧹 *បានសម្អាត Long-Term Memory រួចរាល់ហើយ!* ✨\n\n"
+        f"បានលុបព័ត៌មានចងចាំចំនួន {count} ចំណុច។\n"
+        f"Bot បានត្រលប់ទៅសភាពដើមវិញដោយគ្មានការចងចាំទម្លាប់ចាស់ៗឡើយ។"
+    )
+    await send_clean_response(update, context, msg, reply_markup=get_back_keyboard())
+
+async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Live Google Search Grounding with Gemini: /search <query>."""
+    chat_id = update.effective_chat.id
+    query = " ".join(context.args) if context.args else ""
+    if not query:
+        msg = (
+            "🌐 *ស្វែងរកព័ត៌មាន Real-Time ជាមួយ Google Search Grounding* 🔎\n\n"
+            "លោកអ្នកអាចសួរព័ត៌មានទាន់ហេតុការណ៍ តម្លៃហាងឆេង ឬលទ្ធផលបន្តផ្ទាល់បាន!\n\n"
+            "👉 *របៀបប្រើប្រាស់៖*\n"
+            "• `/search តម្លៃមាស និងប្រេងឥន្ធនៈថ្ងៃនេះនៅកម្ពុជា`\n"
+            "• `/search លទ្ធផលបាល់ទាត់យប់មិញ`\n"
+            "• `/search ព័ត៌មានថ្មីៗបំផុតថ្ងៃនេះ`"
+        )
+        await send_clean_response(update, context, msg, reply_markup=get_back_keyboard())
+        return
+
+    status = await update.message.reply_text("🌐 *កំពុងស្វែងរកទិន្នន័យផ្ទាល់ពី Google Search...* ⏳", parse_mode="Markdown")
+    try:
+        from services.ai_service import query_gemini_live_search
+        ans = await query_gemini_live_search(query, chat_id=chat_id)
+        from handlers.command_handlers import safe_edit_text
+        await safe_edit_text(status, ans, reply_markup=get_back_keyboard())
+    except Exception as e:
+        await status.edit_text(f"❌ កំហុសក្នុងការស្វែងរក៖ {e}")
+
 async def qr_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /qr <text/url> command."""
     text = " ".join(context.args) if context.args else ""
@@ -2192,20 +2242,65 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             await query.answer()
             ai_active = is_ai_mode(chat_id)
             ai_msg = (
-                "✨ *ជំនួយការឆ្លាតវៃ AI (Gemini 2.5 Flash & GPT)* 🤖\n\n"
+                "✨ *ជំនួយការឆ្លាតវៃ AI (Gemini Flash & GPT - Master Level)* 🤖\n\n"
                 "លោកអ្នកអាចសួរនាំសំណួរ វិភាគទិន្នន័យ បកប្រែភាសា និងសរសេរអត្ថបទបានយ៉ាងរហ័ស!\n\n"
-                "💡 *មុខងារពិសេសៗ៖*\n"
+                "💡 *មុខងារពិសេសៗកម្រិត Master៖*\n"
                 f"• **AI Continuous Chat:** {'✅ កំពុងបើក' if ai_active else '❌ បានបិទ'} (ជជែកជាប់គ្នាដោយមិនបាច់វាយ /ask)\n"
-                "• **Voice Message AI:** ផ្ញើសារសំឡេង Voice ➔ AI ឆ្លើយតបជាសំឡេង/អក្សរ\n"
-                "• **Vision OCR:** ផ្ញើរូបភាព ➔ AI អានអក្សរ បកប្រែ ឬដោះស្រាយលំហាត់\n"
-                "• **Command:** `/ask <សំណួរ>`"
+                "• **🧠 Long-Term Memory:** ចងចាំចំណូលចិត្តតន្ត្រី និងទម្លាប់របស់អ្នកស្វ័យប្រវត្តិ\n"
+                "• **🌐 Real-Time Search:** ស្វែងរកព័ត៌មានផ្ទាល់ពី Google Search Grounding (`/search`)\n"
+                "• **🎙️ Voice Message AI:** ផ្ញើសារសំឡេង Voice ➔ AI ឆ្លើយតបជាសំឡេង/អក្សរ\n"
+                "• **📷 Vision OCR:** ផ្ញើរូបភាព ➔ AI អានអក្សរ បកប្រែ ឬដោះស្រាយលំហាត់\n"
+                "• **Commands:** `/ask <សំណួរ>`, `/search <ពាក្យស្វែងរក>`, `/memory`"
             )
             keyboard = [
                 [InlineKeyboardButton("💬 បើក/បិទ AI Continuous Chat", callback_data="btn_toggle_aimode")],
+                [
+                    InlineKeyboardButton("🧠 ការចងចាំ (/memory)", callback_data="btn_view_memory"),
+                    InlineKeyboardButton("🌐 ស្វែងរក Live (/search)", callback_data="btn_search_help")
+                ],
                 [InlineKeyboardButton("🗑️ សម្អាត Conversation Memory", callback_data="btn_clear_aimem")],
                 [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
             ]
             await query.edit_message_text(ai_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+        elif data == "btn_view_memory":
+            await query.answer()
+            from services.memory_service import format_user_memory_display
+            mem_text = format_user_memory_display(chat_id)
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🗑️ លុបការចងចាំទាំងអស់", callback_data="btn_clear_longterm_memory")],
+                [InlineKeyboardButton("🔙 ត្រឡប់ទៅ AI Menu", callback_data="btn_ai_menu")]
+            ])
+            await query.edit_message_text(mem_text, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_clear_longterm_memory":
+            from database import clear_user_memories
+            from services.cache_service import cache_delete
+            clear_user_memories(chat_id)
+            cache_delete(f"mem_prompt_{chat_id}")
+            await query.answer("✅ បានលុបការចងចាំ Long-Term Memory ទាំងអស់រួចរាល់!", show_alert=True)
+            from services.memory_service import format_user_memory_display
+            await query.edit_message_text(
+                format_user_memory_display(chat_id),
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 ត្រឡប់ទៅ AI Menu", callback_data="btn_ai_menu")]]),
+                parse_mode="Markdown"
+            )
+
+        elif data == "btn_search_help":
+            await query.answer()
+            search_msg = (
+                "🌐 *ស្វែងរកព័ត៌មាន Real-Time ជាមួយ Google Search Grounding* 🔎\n\n"
+                "លោកអ្នកអាចសួរព័ត៌មានទាន់ហេតុការណ៍ តម្លៃហាងឆេង ឬលទ្ធផលបន្តផ្ទាល់បាន!\n\n"
+                "👉 *របៀបប្រើប្រាស់៖*\n"
+                "• `/search តម្លៃមាស និងប្រេងឥន្ធនៈថ្ងៃនេះនៅកម្ពុជា`\n"
+                "• `/search លទ្ធផលបាល់ទាត់យប់មិញ`\n"
+                "• `/search ព័ត៌មានជាតិថ្មីៗបំផុត`"
+            )
+            await query.edit_message_text(
+                search_msg,
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 ត្រឡប់ទៅ AI Menu", callback_data="btn_ai_menu")]]),
+                parse_mode="Markdown"
+            )
 
         elif data == "btn_clear_aimem":
             clear_chat_history(chat_id)

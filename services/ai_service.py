@@ -43,10 +43,12 @@ def is_skippable_gemini_error(err: Exception) -> bool:
         "timeout", "timed out", "10060", "10053", "10054", "connection", "aborted", "reset", "socket", "network"
     ])
 
-def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT):
-    """Synchronous worker that calls Gemini with automatic dynamic model discovery and fallback."""
+def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT, enable_search: bool = False):
+    """Synchronous worker that calls Gemini with automatic dynamic model discovery, optional Google Search Grounding, and fallback."""
     from google.genai import types
     global _cached_working_model
+
+    tools = [types.Tool(google_search=types.GoogleSearch())] if enable_search else None
 
     # Try cached working model first for maximum speed
     if _cached_working_model:
@@ -55,13 +57,19 @@ def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT):
                 model=_cached_working_model,
                 contents=contents,
                 config=types.GenerateContentConfig(
-                    system_instruction=system_prompt
+                    system_instruction=system_prompt,
+                    tools=tools
                 )
             )
         except Exception as e:
             if is_skippable_gemini_error(e):
                 logger.warning(f"Cached model {_cached_working_model} failed ({e}), resetting cache...")
                 _cached_working_model = None
+            elif enable_search:
+                # Fallback without search tools if tools failed
+                logger.warning(f"Search grounding failed on {_cached_working_model} ({e}), retrying standard...")
+                enable_search = False
+                tools = None
             else:
                 raise e
 
@@ -84,12 +92,13 @@ def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT):
     last_err = None
     for model_name in candidates:
         try:
-            logger.info(f"Attempting Gemini generation with model: {model_name}")
+            logger.info(f"Attempting Gemini generation with model: {model_name} (search={enable_search})")
             resp = client.models.generate_content(
                 model=model_name,
                 contents=contents,
                 config=types.GenerateContentConfig(
-                    system_instruction=system_prompt
+                    system_instruction=system_prompt,
+                    tools=tools
                 )
             )
             # Successfully generated; cache this working model
@@ -97,6 +106,20 @@ def _call_gemini_api(client, contents, system_prompt: str = SYSTEM_PROMPT):
             logger.info(f"Successfully connected to Gemini model: {model_name}")
             return resp
         except Exception as e:
+            if enable_search:
+                # Retry same model without search tool in case tool is disallowed
+                try:
+                    resp = client.models.generate_content(
+                        model=model_name,
+                        contents=contents,
+                        config=types.GenerateContentConfig(
+                            system_instruction=system_prompt
+                        )
+                    )
+                    _cached_working_model = model_name
+                    return resp
+                except Exception:
+                    pass
             if is_skippable_gemini_error(e):
                 logger.warning(f"Gemini model {model_name} skipped ({e}), trying next candidate...")
                 last_err = e
@@ -120,15 +143,23 @@ def format_gemini_error(err: Exception) -> str:
         )
     return f"❌ Gemini Error: {err_str[:160]}"
 
-async def query_ai(prompt: str) -> str:
-    """Query Gemini or ChatGPT for a single question."""
+async def query_ai(prompt: str, chat_id: Optional[int] = None, enable_search: bool = False) -> str:
+    """Query Gemini or ChatGPT with optional Google Search Grounding & Long-Term Memory context."""
     if GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here":
         try:
             from google import genai
             client = genai.Client(api_key=GEMINI_API_KEY)
             
-            response = await asyncio.to_thread(_call_gemini_api, client, prompt)
-            return f"✨ *Gemini ឆ្លើយតប៖*\n\n{response.text}"
+            system_prompt = SYSTEM_PROMPT
+            if chat_id:
+                from services.memory_service import format_memories_for_ai
+                mem_block = format_memories_for_ai(chat_id)
+                if mem_block:
+                    system_prompt += "\n" + mem_block
+            
+            response = await asyncio.to_thread(_call_gemini_api, client, prompt, system_prompt, enable_search)
+            header = "🌐 *Gemini Real-Time Web Search៖*\n\n" if enable_search else "✨ *Gemini ឆ្លើយតប៖*\n\n"
+            return f"{header}{response.text}"
         except Exception as e:
             logger.error(f"Gemini query error: {e}")
             return format_gemini_error(e)
@@ -155,9 +186,9 @@ async def query_ai(prompt: str) -> str:
     )
 
 async def query_continuous_ai(chat_id: int, user_prompt: str) -> str:
-    """Continuous conversation mode with memory of recent messages."""
+    """Continuous conversation mode with Long-Term Memory and optional Real-Time Search Grounding."""
     if not (GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here"):
-        return await query_ai(user_prompt)
+        return await query_ai(user_prompt, chat_id=chat_id)
 
     try:
         from google import genai
@@ -184,8 +215,24 @@ async def query_continuous_ai(chat_id: int, user_prompt: str) -> str:
                 parts=[types.Part.from_text(text=user_prompt)]
             )
         )
+
+        # Inject long-term profile memories into system instruction
+        from services.memory_service import format_memories_for_ai
+        system_instruction = SYSTEM_PROMPT
+        mem_block = format_memories_for_ai(chat_id)
+        if mem_block:
+            system_instruction += "\n" + mem_block
+
+        # Auto-detect if query asks for real-time / current facts
+        realtime_keywords = [
+            "who won", "today", "news", "price", "vs", "scores", "weather", "current",
+            "gold", "fuel", "exchange", "rate", "breaking",
+            "ថ្ងៃនេះ", "ឥឡូវ", "ហាងឆេង", "បាល់ទាត់", "ព័ត៌មាន", "អត្រាប្តូរប្រាក់", "ប្រេង", "មាស", "ប៉ុន្មាន"
+        ]
+        prompt_lower = user_prompt.lower()
+        should_search = any(k in prompt_lower for k in realtime_keywords)
         
-        response = await asyncio.to_thread(_call_gemini_api, client, contents)
+        response = await asyncio.to_thread(_call_gemini_api, client, contents, system_instruction, should_search)
         reply_text = response.text or "សូមអភ័យទោស ខ្ញុំមិនអាចឆ្លើយតបបានទេនៅពេលនេះ។"
         
         # Save to chat history memory
@@ -197,6 +244,10 @@ async def query_continuous_ai(chat_id: int, user_prompt: str) -> str:
     except Exception as e:
         logger.error(f"Continuous AI error: {e}")
         return format_gemini_error(e)
+
+async def query_gemini_live_search(user_query: str, chat_id: Optional[int] = None) -> str:
+    """Execute live Google Search Grounding with Gemini for real-time web facts."""
+    return await query_ai(user_query, chat_id=chat_id, enable_search=True)
 
 async def process_voice_ai(voice_bytes: bytes, mime_type: str = "audio/ogg") -> str:
     """Understand and respond to Telegram voice message using Gemini."""

@@ -74,6 +74,9 @@ from handlers.command_handlers import (
     handle_photo_message,
     handle_document_image,
     handle_location_message,
+    memory_command,
+    forget_command,
+    search_command,
     button_callback_handler,
 )
 from handlers.video_handlers import handle_video_message
@@ -107,6 +110,9 @@ async def post_init(application: Application):
         BotCommand("reminders", "📋 បញ្ជីសារដាស់តឿន (Active Reminders)"),
         BotCommand("aimode", "🤖 បើក/បិទ AI Continuous Chat"),
         BotCommand("ask", "✨ សួរសំណួរ AI (Ask Gemini/GPT)"),
+        BotCommand("search", "🌐 ស្វែងរក Live Google Search Grounding"),
+        BotCommand("memory", "🧠 ការចងចាំ Long-Term Memory"),
+        BotCommand("forget", "🧹 លុបការចងចាំ AI (Reset Memory)"),
         BotCommand("qr", "🔲 បង្កើត QR Code (Generate QR)"),
         BotCommand("sound", "🔍 ស្វែងរកបទភ្លេង TikTok (Sound Finder)"),
         BotCommand("antispam", "🛡️ ការពារ Group (Group Anti-Spam)"),
@@ -205,6 +211,11 @@ def main():
     app.add_handler(CommandHandler("upscale", enhance_command, block=False))
     app.add_handler(CommandHandler("watermark", watermark_command, block=False))
     app.add_handler(CommandHandler("welcome", welcome_command, block=False))
+
+    # Register V5 Master Level Handlers (Long-Term Vector Memory, Real-Time Search)
+    app.add_handler(CommandHandler("memory", memory_command, block=False))
+    app.add_handler(CommandHandler("forget", forget_command, block=False))
+    app.add_handler(CommandHandler("search", search_command, block=False))
     
     # Register Callback Query Handler for Buttons
     app.add_handler(CallbackQueryHandler(button_callback_handler, block=False))

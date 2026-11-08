@@ -385,6 +385,81 @@ def test_clean_chat_and_auto_cleanup():
     print("  - Twice-daily (3AM & 12PM) auto-clean database pipeline: OK")
     print("  [OK] Chat Cleaner & Twice-Daily Auto-Clean verified!")
 
+def test_long_term_memory_service():
+    print("\n[15] Testing Long-Term Vector & Semantic Memory Service...")
+    from services.memory_service import (
+        format_memories_for_ai,
+        format_user_memory_display,
+        auto_extract_and_save_facts,
+    )
+    from database import (
+        save_user_memory,
+        get_user_memories,
+        clear_user_memories,
+    )
+    test_user_id = 777111222
+    clear_user_memories(test_user_id)
+    
+    # 1. Manual save
+    save_user_memory(test_user_id, "music", "favorite_singer", "ចូលចិត្តស្តាប់ចម្រៀង វណ្ណដា (VannDa)")
+    save_user_memory(test_user_id, "budget", "morning_coffee", "ចូលចិត្តផឹកកាហ្វេទឹកដោះគោពេលព្រឹក")
+    
+    memories = get_user_memories(test_user_id)
+    assert len(memories) == 2, "Should have 2 saved memories"
+    assert any("វណ្ណដា" in m["content"] for m in memories)
+    print("  - Stored user memories verified: 2 items")
+    
+    # 2. Context formatting for AI
+    ai_prompt_context = format_memories_for_ai(test_user_id)
+    assert "វណ្ណដា" in ai_prompt_context
+    assert "User Profile & Long-Term Memories" in ai_prompt_context
+    print("  - AI prompt contextual memory block generated: OK")
+    
+    # 3. Automatic memory extraction from chat
+    fact_result = auto_extract_and_save_facts(test_user_id, "ថ្ងៃកំណើតខ្ញុំគឺ ថ្ងៃទី ១៥ ខែកក្កដា")
+    assert fact_result is not None
+    assert "ថ្ងៃកំណើត" in fact_result
+    
+    memories_after = get_user_memories(test_user_id)
+    assert len(memories_after) == 3
+    print("  - Auto-extracted memory from user text: OK")
+    
+    display = format_user_memory_display(test_user_id)
+    assert "ប្រព័ន្ធចងចាំ Long-Term Memory" in display
+    
+    clear_user_memories(test_user_id)
+    assert len(get_user_memories(test_user_id)) == 0
+    print("  [OK] Long-Term Vector & Semantic Memory Service verified!")
+
+async def test_enterprise_architecture():
+    print("\n[16] Testing Enterprise Architecture (PostgreSQL Ready, Redis/Memory Cache & Worker)...")
+    from database import get_database_info
+    from services.cache_service import cache_set, cache_get, cache_delete, get_cache_status
+    from services.worker_service import execute_heavy_job, get_worker_status
+
+    # 1. Database Info
+    db_info = get_database_info()
+    assert "engine" in db_info
+    print(f"  - Database Engine: {db_info['engine']} (PostgreSQL ready: {db_info['is_postgres']})")
+
+    # 2. Cache Service
+    cache_set("test_rate_usd", 4050, ttl_seconds=60)
+    cached_val = cache_get("test_rate_usd")
+    assert cached_val == 4050
+    cache_delete("test_rate_usd")
+    assert cache_get("test_rate_usd") is None
+    c_status = get_cache_status()
+    print(f"  - Cache Status: {c_status['provider']} (In-memory items: {c_status['in_memory_items']})")
+
+    # 3. Background Worker
+    def heavy_math(x, y):
+        return x * y + 100
+    res = await execute_heavy_job("test_calc", heavy_math, 5, 20)
+    assert res == 200
+    w_status = get_worker_status()
+    print(f"  - Background Worker Pool: {w_status['engine']} (Workers: {w_status['max_workers']})")
+    print("  [OK] Enterprise Architecture verified!")
+
 if __name__ == "__main__":
     test_holiday_calendar()
     test_database()
@@ -400,4 +475,6 @@ if __name__ == "__main__":
     test_welcome_banner_service()
     test_image_location_service()
     test_clean_chat_and_auto_cleanup()
-    print("\n🎉 ALL 14 TEST SUITES PASSED SUCCESSFULLY! ✅")
+    test_long_term_memory_service()
+    asyncio.run(test_enterprise_architecture())
+    print("\n🎉 ALL 16 TEST SUITES PASSED SUCCESSFULLY! ✅")

@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta
@@ -128,6 +129,21 @@ def init_db():
             is_enabled INTEGER DEFAULT 1,
             clean_interval_minutes INTEGER DEFAULT 20,
             updated_at TEXT
+        )
+    """)
+
+    # Table for Long-Term Vector / Semantic Memory
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_long_term_memories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER NOT NULL,
+            category TEXT NOT NULL,
+            memory_key TEXT NOT NULL,
+            content TEXT NOT NULL,
+            embedding TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            UNIQUE(chat_id, memory_key)
         )
     """)
     
@@ -753,4 +769,90 @@ def clear_auto_clean_messages_for_chat(chat_id: int):
     cursor.execute("DELETE FROM auto_clean_messages WHERE chat_id = ?", (chat_id,))
     conn.commit()
     conn.close()
+
+# -------------------------------------------------------------
+# Long-Term Semantic & Vector Memory Operations
+# -------------------------------------------------------------
+def save_user_memory(chat_id: int, category: str, memory_key: str, content: str, embedding: Optional[str] = None):
+    """Save or update a persistent user memory item (e.g. music preference, habit, birthday)."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    now_iso = datetime.utcnow().isoformat()
+    cursor.execute("""
+        INSERT INTO user_long_term_memories (chat_id, category, memory_key, content, embedding, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(chat_id, memory_key) DO UPDATE SET
+            category = excluded.category,
+            content = excluded.content,
+            embedding = coalesce(excluded.embedding, user_long_term_memories.embedding),
+            updated_at = excluded.updated_at
+    """, (chat_id, category, memory_key, content, embedding, now_iso, now_iso))
+    conn.commit()
+    conn.close()
+
+def get_user_memories(chat_id: int, category: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Retrieve stored long-term memories for a user, optionally filtered by category."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    if category:
+        cursor.execute("""
+            SELECT id, category, memory_key, content, embedding, updated_at
+            FROM user_long_term_memories
+            WHERE chat_id = ? AND category = ?
+            ORDER BY updated_at DESC
+        """, (chat_id, category))
+    else:
+        cursor.execute("""
+            SELECT id, category, memory_key, content, embedding, updated_at
+            FROM user_long_term_memories
+            WHERE chat_id = ?
+            ORDER BY updated_at DESC
+        """, (chat_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {
+            "id": r[0],
+            "category": r[1],
+            "key": r[2],
+            "content": r[3],
+            "embedding": r[4],
+            "updated_at": r[5],
+        }
+        for r in rows
+    ]
+
+def delete_user_memory(chat_id: int, memory_id: int) -> bool:
+    """Delete a single memory item by id."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM user_long_term_memories WHERE chat_id = ? AND id = ?", (chat_id, memory_id))
+    affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return affected > 0
+
+def clear_user_memories(chat_id: int) -> int:
+    """Clear all long-term memories for a user."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM user_long_term_memories WHERE chat_id = ?", (chat_id,))
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+# -------------------------------------------------------------
+# Enterprise PostgreSQL / Supabase Connector & Compatibility Helper
+# -------------------------------------------------------------
+def get_database_info() -> Dict[str, Any]:
+    """Return database engine status (PostgreSQL ready or local SQLite)."""
+    db_url = os.getenv("DATABASE_URL", "")
+    is_postgres = bool(db_url and ("postgres://" in db_url or "postgresql://" in db_url))
+    return {
+        "engine": "PostgreSQL (Enterprise/Supabase)" if is_postgres else "SQLite3 (Local / Fast Embedded)",
+        "is_postgres": is_postgres,
+        "database_url_configured": bool(db_url),
+        "sqlite_path": str(DB_PATH),
+    }
 

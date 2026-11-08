@@ -175,8 +175,12 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
     url = extract_video_url(text)
     
-    # If not a URL, check if continuous AI mode is active
+    # If not a URL, check if continuous AI mode is active or auto-extract memory
     if not url:
+        # Check for automatic Long-Term Memory mining (music taste, habits, birthday)
+        from services.memory_service import auto_extract_and_save_facts
+        memory_fact = auto_extract_and_save_facts(chat.id, text)
+
         if is_ai_mode(chat.id):
             await chat.send_action("typing")
             ai_reply = await query_continuous_ai(chat.id, text)
@@ -185,6 +189,16 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
             ])
             from handlers.command_handlers import safe_reply_text
             await safe_reply_text(update.message, ai_reply, reply_markup=exit_button)
+            return
+
+        if memory_fact:
+            confirm_text = (
+                f"{memory_fact}\n\n"
+                f"🧠 *Bot បានកត់ត្រាចូល Long-Term Memory រួចរាល់ហើយ!* ✨\n"
+                f"ខ្ញុំនឹងចងចាំចំណុចនេះ ដើម្បីផ្តល់អនុសាសន៍ និងចម្លើយដែលត្រូវចិត្តអ្នកជានិច្ច។"
+            )
+            from handlers.command_handlers import send_clean_response, get_back_keyboard
+            await send_clean_response(update, context, confirm_text, reply_markup=get_back_keyboard())
             return
             
         reply_msg = (
