@@ -460,6 +460,78 @@ async def test_enterprise_architecture():
     print(f"  - Background Worker Pool: {w_status['engine']} (Workers: {w_status['max_workers']})")
     print("  [OK] Enterprise Architecture verified!")
 
+async def test_briefing_service_async():
+    print("\n[17] Testing Morning Executive Briefing (VIP Secretary)...")
+    from services.briefing_service import generate_executive_briefing
+    chat_id = 999888777
+    briefing = await generate_executive_briefing(chat_id, user_name="Socheat")
+    assert "Morning Executive Briefing" in briefing
+    assert "Socheat" in briefing
+    assert "អាកាសធាតុប្រចាំថ្ងៃ" in briefing
+    assert "កាលវិភាគ" in briefing
+    assert "សេដ្ឋកិច្ច" in briefing
+    assert "សម្រង់គំនិតលើកទឹកចិត្ត" in briefing
+    print("  - Generated VIP Executive Briefing successfully!")
+    print("  [OK] Morning Executive Briefing verified!")
+
+def test_file_master_service():
+    print("\n[18] Testing Universal File Master (PDF Compression, DOCX, Split & Merge)...")
+    import pypdf
+    import io
+    from PIL import Image
+    from services.file_master_service import (
+        compress_pdf_bytes,
+        compress_image_bytes,
+        pdf_to_docx_bytes,
+        split_pdf_pages,
+        merge_pdf_documents,
+    )
+
+    # 1. Create a dummy multi-page PDF in memory
+    writer = pypdf.PdfWriter()
+    for i in range(3):
+        writer.add_blank_page(width=300, height=300)
+    pdf_buf = io.BytesIO()
+    writer.write(pdf_buf)
+    dummy_pdf_bytes = pdf_buf.getvalue()
+
+    # Test PDF Compression
+    comp_pdf, c_stats = compress_pdf_bytes(dummy_pdf_bytes)
+    assert len(comp_pdf) > 0
+    assert c_stats["pages"] == 3
+    print(f"  - PDF Compression verified: {c_stats['pages']} pages")
+
+    # Test PDF to DOCX
+    docx_bytes, d_stats = pdf_to_docx_bytes(dummy_pdf_bytes, filename="test_doc.pdf")
+    assert len(docx_bytes) > 0
+    # Verify it is a valid zip archive with word/document.xml
+    import zipfile
+    with zipfile.ZipFile(io.BytesIO(docx_bytes)) as z:
+        assert "word/document.xml" in z.namelist()
+        assert "[Content_Types].xml" in z.namelist()
+    print(f"  - PDF to Word (.docx) generator verified: {d_stats['pages']} pages, valid OpenXML zip archive")
+
+    # Test PDF Split
+    split_bytes, s_stats = split_pdf_pages(dummy_pdf_bytes, 1, 2)
+    assert s_stats["extracted_pages"] == 2
+    print(f"  - PDF Split verified: extracted {s_stats['extracted_pages']} pages")
+
+    # Test PDF Merge
+    merged_bytes, m_stats = merge_pdf_documents([split_bytes, split_bytes])
+    assert m_stats["total_pages"] == 4
+    print(f"  - PDF Merge verified: combined {m_stats['total_documents']} documents into {m_stats['total_pages']} pages")
+
+    # Test Image Compression
+    img = Image.new("RGB", (2000, 1500), color=(100, 150, 200))
+    img_buf = io.BytesIO()
+    img.save(img_buf, format="JPEG", quality=95)
+    raw_img_bytes = img_buf.getvalue()
+
+    comp_img, img_stats = compress_image_bytes(raw_img_bytes, max_dim=800, quality=70)
+    assert len(comp_img) < len(raw_img_bytes)
+    print(f"  - Image Compression & Resize: {img_stats['original_res']} -> {img_stats['new_res']} (-{img_stats['saved_pct']}%)")
+    print("  [OK] Universal File Master verified!")
+
 if __name__ == "__main__":
     test_holiday_calendar()
     test_database()
@@ -477,4 +549,6 @@ if __name__ == "__main__":
     test_clean_chat_and_auto_cleanup()
     test_long_term_memory_service()
     asyncio.run(test_enterprise_architecture())
-    print("\n🎉 ALL 16 TEST SUITES PASSED SUCCESSFULLY! ✅")
+    asyncio.run(test_briefing_service_async())
+    test_file_master_service()
+    print("\n🎉 ALL 18 TEST SUITES PASSED SUCCESSFULLY! ✅")

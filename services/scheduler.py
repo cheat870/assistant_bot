@@ -122,26 +122,32 @@ async def daily_weather_job(context):
     await send_daily_weather_to_subscribers(context.application)
 
 async def daily_news_job(context):
-    """JobQueue callback function executed daily at 7:00 AM to send morning news digest."""
-    logger.info("Executing scheduled 7:00 AM Cambodia morning news digest...")
+    """JobQueue callback function executed daily at 7:00 AM to send VIP Morning Executive Briefing."""
+    logger.info("Executing scheduled 7:00 AM Cambodia VIP Morning Executive Briefing...")
     subscribers = get_active_subscribers()
     if not subscribers:
-        logger.info("No subscribers found for morning news digest.")
+        logger.info("No subscribers found for morning briefing.")
         return
-    news_text = await generate_morning_news_digest()
+        
+    from services.briefing_service import generate_executive_briefing
+    from handlers.command_handlers import get_briefing_keyboard
+
     sent_count = 0
     for chat_id in subscribers:
         try:
+            briefing_text = await generate_executive_briefing(chat_id)
             await context.application.bot.send_message(
                 chat_id=chat_id,
-                text=news_text,
-                parse_mode="Markdown"
+                text=briefing_text,
+                reply_markup=get_briefing_keyboard(),
+                parse_mode="Markdown",
+                disable_web_page_preview=True
             )
             sent_count += 1
             await asyncio.sleep(0.05)
         except Exception as e:
-            logger.warning(f"Failed to send morning news digest to {chat_id}: {e}")
-    logger.info(f"7:00 AM Morning news digest sent to {sent_count}/{len(subscribers)} subscribers.")
+            logger.warning(f"Failed to send VIP morning briefing to {chat_id}: {e}")
+    logger.info(f"7:00 AM Morning Executive Briefing sent to {sent_count}/{len(subscribers)} subscribers.")
 
 async def check_reminders_job(context):
     """JobQueue callback executed every 60 seconds to fire due reminders."""

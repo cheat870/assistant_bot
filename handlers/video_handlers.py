@@ -31,6 +31,8 @@ from handlers.command_handlers import (
     aimode_command,
     budget_command,
     news_command,
+    briefing_command,
+    compress_command,
     safe_reply_text,
 )
 
@@ -113,6 +115,12 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
             await send_clean_response(update, context, msg, reply_markup=exp_kb)
             return
         await budget_command(update, context)
+        return
+    elif any(k in norm_text for k in ["សង្ខេប", "briefing", "vip"]) or norm_lower in ["briefing", "/briefing"]:
+        await briefing_command(update, context)
+        return
+    elif any(k in norm_text for k in ["បង្រួម", "បម្លែង", "compress", "convert"]) or norm_lower in ["compress", "/compress", "convert", "/convert"]:
+        await compress_command(update, context)
         return
     elif "ព័ត៌មាន" in norm_text or norm_lower in ["news", "/news"]:
         await news_command(update, context)

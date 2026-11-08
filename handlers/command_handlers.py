@@ -184,7 +184,7 @@ def get_main_menu_keyboard(chat_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton("💰 សេដ្ឋកិច្ច / មាស / សាំង", callback_data="btn_finance"),
         ],
         [
-            InlineKeyboardButton("📰 ព័ត៌មានពេលព្រឹក 7AM", callback_data="btn_news"),
+            InlineKeyboardButton("👑 សង្ខេបពេលព្រឹក VIP", callback_data="btn_briefing"),
             InlineKeyboardButton("🌤️ អាកាសធាតុបច្ចុប្បន្ន", callback_data="btn_weather_now"),
         ],
         [
@@ -196,7 +196,7 @@ def get_main_menu_keyboard(chat_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton("⏰ សារដាស់តឿន (Reminders)", callback_data="btn_reminders"),
         ],
         [
-            InlineKeyboardButton("📄 Chat with PDF (/pdf)", callback_data="btn_pdf_help"),
+            InlineKeyboardButton("🗜️ File Master (/compress)", callback_data="btn_compress_help"),
             InlineKeyboardButton("🔍 ធ្វើឱ្យច្បាស់ HD (/enhance)", callback_data="btn_photo_enhance_help"),
         ],
         [
@@ -228,6 +228,21 @@ def get_back_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔙 ត្រឡប់ទៅ Menu ដើម", callback_data="btn_back_main")]
     ])
+
+def get_briefing_keyboard() -> InlineKeyboardMarkup:
+    """Action keyboard for VIP Morning Executive Briefing."""
+    keyboard = [
+        [
+            InlineKeyboardButton("🔄 Refresh ព័ត៌មាន", callback_data="btn_refresh_briefing"),
+            InlineKeyboardButton("🌤️ អាកាសធាតុឥឡូវ", callback_data="btn_weather_now"),
+        ],
+        [
+            InlineKeyboardButton("⏰ បន្ថែម Reminder", callback_data="btn_reminders"),
+            InlineKeyboardButton("💰 សេដ្ឋកិច្ច/មាស/សាំង", callback_data="btn_finance"),
+        ],
+        [InlineKeyboardButton("🔙 ត្រឡប់ទៅ Menu ដើម", callback_data="btn_back_main")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
 def get_location_selection_keyboard() -> InlineKeyboardMarkup:
     """Keyboard for selecting provinces or GPS location."""
@@ -686,6 +701,36 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_edit_text(status, ans, reply_markup=get_back_keyboard())
     except Exception as e:
         await status.edit_text(f"❌ កំហុសក្នុងការស្វែងរក៖ {e}")
+
+async def briefing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate VIP Morning Executive Briefing: /briefing."""
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    first_name = user.first_name if user else "លោកអ្នក"
+    status = await update.message.reply_text("👑 *កំពុងរៀបចំរបាយការណ៍សង្ខេប VIP ជូនអ្នក...* ⏳", parse_mode="Markdown")
+    try:
+        from services.briefing_service import generate_executive_briefing
+        briefing_text = await generate_executive_briefing(chat_id, user_name=first_name)
+        await safe_edit_text(status, briefing_text, reply_markup=get_briefing_keyboard())
+    except Exception as e:
+        logger.error(f"Error in briefing_command: {e}")
+        await status.edit_text(f"❌ មិនអាចទាញយករបាយការណ៍បានទេ៖ {e}")
+
+async def compress_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Help and options for compressing PDF and images: /compress."""
+    msg = (
+        "🗜️ *មជ្ឈមណ្ឌលបង្រួម & បម្លែងឯកសារ (Universal File Master)* ✨\n\n"
+        "លោកអ្នកអាចបង្រួមទំហំឯកសារដើម្បីផ្ញើបានលឿន និងសន្សំសំចៃ Internet៖\n\n"
+        "📄 *១. បង្រួមឯកសារ PDF (Compress PDF)៖*\n"
+        "• គ្រាន់តែផ្ញើ File PDF ចូលមកក្នុង Bot\n"
+        "• រួចចុចប៊ូតុង `🗜️ បង្រួមទំហំ (Compress)` ខាងក្រោម File នោះ!\n\n"
+        "🔄 *២. បម្លែង PDF ➔ Word (.docx)៖*\n"
+        "• ផ្ញើ File PDF ➔ ចុចប៊ូតុង `🔄 បម្លែងទៅ Word (.docx)` ភ្លាមៗ!\n"
+        "• លោកអ្នកនឹងទទួលបាន file Word សម្រាប់កែសម្រួលបានដោយសេរី។\n\n"
+        "🖼️ *៣. បង្រួមរូបភាព (Compress Image)៖*\n"
+        "• ផ្ញើរូបភាពចូលដោយផ្ទាល់ដើម្បីបង្រួមទំហំ KB/MB ដោយរក្សាភាពច្បាស់!"
+    )
+    await send_clean_response(update, context, msg, reply_markup=get_back_keyboard())
 
 async def qr_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /qr <text/url> command."""
@@ -1328,8 +1373,20 @@ async def handle_pdf_document(update: Update, context: ContextTypes.DEFAULT_TYPE
             extracted_text=pdf_info.get("text", ""),
             total_pages=pdf_info.get("total_pages", 1)
         )
+        context.user_data["last_pdf_file_id"] = doc.file_id
+        context.user_data["last_pdf_filename"] = filename
 
-        await safe_edit_text(status_msg, summary)
+        pdf_actions_kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🔄 បម្លែងទៅ Word (.docx)", callback_data="btn_pdf_to_word"),
+                InlineKeyboardButton("🗜️ បង្រួមទំហំ (Compress)", callback_data="btn_compress_pdf"),
+            ],
+            [
+                InlineKeyboardButton("🧹 សម្អាតសារ", callback_data="btn_clean_chat"),
+                InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+            ]
+        ])
+        await safe_edit_text(status_msg, summary, reply_markup=pdf_actions_kb)
     except Exception as e:
         logger.error(f"Error analyzing PDF document: {e}")
         await safe_edit_text(status_msg, f"❌ កំហុសក្នុងការអាន PDF៖ {str(e)[:140]}")
@@ -2366,16 +2423,109 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             )
             await query.message.reply_text(msg, parse_mode="Markdown")
 
-        elif data == "btn_pdf_help":
+        elif data == "btn_pdf_help" or data == "btn_compress_help":
             await query.answer()
             msg = (
-                "📄 *ជំនួយការឯកសារ PDF & Chat with PDF (/pdf)* 🇰🇭\n\n"
+                "🗜️ *Universal File Master & PDF Converter* ✨\n\n"
                 "👉 *របៀបប្រើប្រាស់ងាយៗ៖*\n"
-                "1. **ផ្ញើ ឬ Forward File PDF ចូលមកកាន់ Bot** (កិច្ចសន្យា, សៀវភៅ, មេរៀន, ឬរបាយការណ៍)\n"
-                "2. Bot នឹងអាន និងសង្ខេបចំណុចសំខាន់ៗជាភាសាខ្មែរភ្លាមៗ\n"
-                "3. បន្ទាប់មក បងអាច **Reply លើសារសង្ខេប** ឬវាយ `/pdf <សំណួរ>` ដើម្បីសួរលម្អិតពីទំព័រណាមួយបាន!"
+                "1. **ផ្ញើ File PDF ចូលមកក្នុង Bot**\n"
+                "2. Bot នឹងអាន & សង្ខេបខ្លឹមសារជាភាសាខ្មែរភ្លាមៗ\n"
+                "3. បងអាចចុចប៊ូតុងខាងក្រោម File នោះដើម្បី៖\n"
+                "   • `🔄 បម្លែងទៅ Word (.docx)` ➔ ទាញយកជា Word កែអត្ថបទបានភ្លាមៗ\n"
+                "   • `🗜️ បង្រួមទំហំ (Compress)` ➔ បង្រួមទំហំ PDF ឱ្យតូចស្រាល\n"
+                "   • `💬 Chat with PDF` ➔ សួរសំណួរលម្អិតពីឯកសារ\n\n"
+                "💡 _អ្នកក៏អាចផ្ញើរូបភាពដើម្បីបង្រួមទំហំ KB/MB បានផងដែរ!_"
             )
             await query.edit_message_text(msg, reply_markup=get_back_keyboard(), parse_mode="Markdown")
+
+        elif data == "btn_briefing":
+            await query.answer()
+            first_name = user.first_name if user else "លោកអ្នក"
+            status_text = "👑 *កំពុងរៀបចំរបាយការណ៍សង្ខេប VIP ជូនអ្នក...* ⏳"
+            await query.edit_message_text(status_text, parse_mode="Markdown")
+            from services.briefing_service import generate_executive_briefing
+            briefing_text = await generate_executive_briefing(chat_id, user_name=first_name)
+            await query.edit_message_text(
+                briefing_text,
+                reply_markup=get_briefing_keyboard(),
+                parse_mode="Markdown",
+                disable_web_page_preview=True
+            )
+
+        elif data == "btn_refresh_briefing":
+            await query.answer("🔄 កំពុង Refresh របាយការណ៍...")
+            first_name = user.first_name if user else "លោកអ្នក"
+            from services.briefing_service import generate_executive_briefing
+            briefing_text = await generate_executive_briefing(chat_id, user_name=first_name)
+            await query.edit_message_text(
+                briefing_text,
+                reply_markup=get_briefing_keyboard(),
+                parse_mode="Markdown",
+                disable_web_page_preview=True
+            )
+
+        elif data == "btn_pdf_to_word":
+            await query.answer("🔄 កំពុងបម្លែង PDF ទៅជា Word (.docx)...")
+            file_id = context.user_data.get("last_pdf_file_id")
+            filename = context.user_data.get("last_pdf_filename", "document.pdf")
+            if not file_id:
+                await query.answer("⚠️ រកមិនឃើញ file PDF ដើមឡើយ សូមផ្ញើ file ចូលម្តងទៀត!", show_alert=True)
+                return
+            try:
+                tg_file = await context.bot.get_file(file_id)
+                pdf_bytes = bytes(await tg_file.download_as_bytearray())
+                from services.file_master_service import pdf_to_docx_bytes
+                docx_bytes, stats = pdf_to_docx_bytes(pdf_bytes, filename)
+                clean_name = filename.rsplit(".", 1)[0]
+                caption = (
+                    f"📄 *បានបម្លែងទៅជា Microsoft Word (.docx) ដោយជោគជ័យ!* ✨\n\n"
+                    f"📑 ចំនួនទំព័រ៖ `{stats['pages']}` ទំព័រ\n"
+                    f"📊 ទំហំ File Word៖ `{stats['docx_size_kb']} KB`\n"
+                    f"💡 លោកអ្នកអាចបើកកែសម្រួលអត្ថបទក្នុង Word ឬ Google Docs បានភ្លាមៗ!"
+                )
+                import io
+                await context.bot.send_document(
+                    chat_id=chat_id,
+                    document=io.BytesIO(docx_bytes),
+                    filename=f"{clean_name}.docx",
+                    caption=caption,
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.error(f"Error converting PDF to docx: {e}")
+                await query.answer(f"❌ មិនអាចបម្លែងបានទេ៖ {e}", show_alert=True)
+
+        elif data == "btn_compress_pdf":
+            await query.answer("🗜️ កំពុងបង្រួមទំហំ File PDF...")
+            file_id = context.user_data.get("last_pdf_file_id")
+            filename = context.user_data.get("last_pdf_filename", "document.pdf")
+            if not file_id:
+                await query.answer("⚠️ រកមិនឃើញ file PDF ដើមឡើយ សូមផ្ញើ file ចូលម្តងទៀត!", show_alert=True)
+                return
+            try:
+                tg_file = await context.bot.get_file(file_id)
+                pdf_bytes = bytes(await tg_file.download_as_bytearray())
+                from services.file_master_service import compress_pdf_bytes
+                comp_bytes, stats = compress_pdf_bytes(pdf_bytes)
+                clean_name = filename.rsplit(".", 1)[0]
+                caption = (
+                    f"🗜️ *បានបង្រួមទំហំ PDF ដោយជោគជ័យ!* ✨\n\n"
+                    f"📐 ទំហំដើម៖ `{stats['original_kb']} KB`\n"
+                    f"📉 ទំហំថ្មី៖ `{stats['compressed_kb']} KB`\n"
+                    f"⚡ សន្សំសំចៃទំហំ៖ `-{stats['saved_pct']}%`\n"
+                    f"📑 ចំនួនទំព័រ៖ `{stats['pages']}` ទំព័រ"
+                )
+                import io
+                await context.bot.send_document(
+                    chat_id=chat_id,
+                    document=io.BytesIO(comp_bytes),
+                    filename=f"compressed_{filename}",
+                    caption=caption,
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.error(f"Error compressing PDF: {e}")
+                await query.answer(f"❌ មិនអាចបង្រួមបានទេ៖ {e}", show_alert=True)
 
         elif data == "btn_back_main":
             await query.answer()

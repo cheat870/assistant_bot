@@ -77,6 +77,8 @@ from handlers.command_handlers import (
     memory_command,
     forget_command,
     search_command,
+    briefing_command,
+    compress_command,
     button_callback_handler,
 )
 from handlers.video_handlers import handle_video_message
@@ -92,6 +94,8 @@ async def post_init(application: Application):
     """Register official commands in Telegram native menu button."""
     commands = [
         BotCommand("start", "🏠 ផ្ទាំង Dashboard មេ (Main Menu)"),
+        BotCommand("briefing", "👑 សង្ខេបពេលព្រឹក VIP (Morning Briefing)"),
+        BotCommand("compress", "🗜️ បង្រួម & បម្លែងឯកសារ (File Master)"),
         BotCommand("budget", "📊 ចំណូល-ចំណាយ (Expense Tracker)"),
         BotCommand("spend", "💸 កត់ត្រាចំណាយ (Log Expense)"),
         BotCommand("income", "💰 កត់ត្រាចំណូល (Log Income)"),
@@ -212,10 +216,12 @@ def main():
     app.add_handler(CommandHandler("watermark", watermark_command, block=False))
     app.add_handler(CommandHandler("welcome", welcome_command, block=False))
 
-    # Register V5 Master Level Handlers (Long-Term Vector Memory, Real-Time Search)
+    # Register V5 Master Level Handlers (Long-Term Vector Memory, Real-Time Search, Briefing, File Master)
     app.add_handler(CommandHandler("memory", memory_command, block=False))
     app.add_handler(CommandHandler("forget", forget_command, block=False))
     app.add_handler(CommandHandler("search", search_command, block=False))
+    app.add_handler(CommandHandler("briefing", briefing_command, block=False))
+    app.add_handler(CommandHandler("compress", compress_command, block=False))
     
     # Register Callback Query Handler for Buttons
     app.add_handler(CallbackQueryHandler(button_callback_handler, block=False))
