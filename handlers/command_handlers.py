@@ -609,21 +609,27 @@ async def reminders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def clean_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Handle /clean or /clear [count] to wipe out old messages and reset chat to a clean state.
-    Default count: 40 messages, maximum 100.
-    Deletes old status updates, menus, and user command clutter.
+    Handle /clean or /clear [count|all] to wipe out ALL messages (both old and new)
+    and reset chat to a 100% clean state with a single fresh menu.
     """
     chat = update.effective_chat
     user = update.effective_user
     current_msg = update.message
     current_msg_id = current_msg.message_id if current_msg else None
+    chat_id = chat.id
 
-    count = 40
+    from services.chat_cleaner_service import purge_chat_history, format_clean_notice_text
+
+    sweep_depth = None
     if context.args:
-        try:
-            count = min(max(int(context.args[0]), 5), 100)
-        except ValueError:
-            count = 40
+        raw_arg = str(context.args[0]).lower().strip()
+        if raw_arg in ["all", "max", "full", "ទាំងអស់", "clearall"]:
+            sweep_depth = max(1000, current_msg_id if current_msg_id else 1000)
+        else:
+            try:
+                sweep_depth = min(max(int(raw_arg), 10), 2000)
+            except ValueError:
+                sweep_depth = None
 
     # Delete the /clean command message itself first if in private chat
     if current_msg and chat.type == "private":
@@ -632,35 +638,31 @@ async def clean_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except Exception:
             pass
 
-    deleted_count = 0
+    extra_ids = []
     if current_msg_id:
-        start_id = max(1, current_msg_id - count)
-        msg_ids = list(range(start_id, current_msg_id))
-        
-        # Batch delete via delete_messages
-        try:
-            for i in range(0, len(msg_ids), 100):
-                chunk = msg_ids[i:i+100]
-                await context.bot.delete_messages(chat_id=chat.id, message_ids=chunk)
-                deleted_count += len(chunk)
-        except Exception:
-            # Fallback to individual deletion
-            for mid in reversed(msg_ids):
-                try:
-                    await context.bot.delete_message(chat_id=chat.id, message_id=mid)
-                    deleted_count += 1
-                except Exception:
-                    pass
+        extra_ids.append(current_msg_id)
+    if context.user_data.get("last_menu_id"):
+        extra_ids.append(context.user_data["last_menu_id"])
+    if context.user_data.get("last_bot_msg_id"):
+        extra_ids.append(context.user_data["last_bot_msg_id"])
+    if context.user_data.get("last_remind_msg_id"):
+        extra_ids.append(context.user_data["last_remind_msg_id"])
+
+    # Purge all messages across chat history (both old and new)
+    await purge_chat_history(
+        bot=context.bot,
+        chat_id=chat_id,
+        current_msg_id=current_msg_id,
+        sweep_depth=sweep_depth,
+        extra_ids=extra_ids
+    )
 
     # Clear stored tracking IDs in user_data
     context.user_data.pop("last_remind_msg_id", None)
     context.user_data.pop("last_menu_id", None)
+    context.user_data.pop("last_bot_msg_id", None)
 
-    clean_notice = (
-        f"🧹 *បានសម្អាតសារចាស់ៗដោយជោគជ័យ!* ✨\n\n"
-        f"ឥឡូវនេះការជជែករបស់អ្នកមានសភាពស្អាតបាត និងគ្មានសារចាស់ៗកកកុញទៀតឡើយ។\n"
-        f"សូមជ្រើសរើសមុខងារដែលចង់ប្រើប្រាស់បន្តខាងក្រោម៖"
-    )
+    clean_notice = format_clean_notice_text()
     sent_menu = await context.bot.send_message(
         chat_id=chat.id,
         text=clean_notice,
@@ -668,6 +670,12 @@ async def clean_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         parse_mode="Markdown"
     )
     context.user_data["last_menu_id"] = sent_menu.message_id
+    context.user_data["last_bot_msg_id"] = sent_menu.message_id
+    try:
+        from database import record_auto_clean_message
+        record_auto_clean_message(chat_id, sent_menu.message_id)
+    except Exception:
+        pass
 
 async def autoclean_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Toggle twice-daily auto-clean (3:00 AM & 12:00 PM): /autoclean."""
@@ -3325,37 +3333,43 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             )
 
         elif data == "btn_clean_chat":
-            await query.answer("🧹 កំពុងសម្អាតសារចាស់ៗ...")
+            chat_id = query.message.chat_id if query.message else update.effective_chat.id
             current_msg_id = query.message.message_id if query.message else None
+            await query.answer("🧹 កំពុងសម្អាតសារទាំងអស់ (ទាំងចាស់ និងថ្មី)...")
+
+            from services.chat_cleaner_service import purge_chat_history, format_clean_notice_text
             
             # Delete the message containing the button first
-            try:
-                await query.message.delete()
-            except Exception:
-                pass
-                
-            if current_msg_id:
-                start_id = max(1, current_msg_id - 40)
-                msg_ids = list(range(start_id, current_msg_id))
+            if query.message:
                 try:
-                    for i in range(0, len(msg_ids), 100):
-                        chunk = msg_ids[i:i+100]
-                        await context.bot.delete_messages(chat_id=chat_id, message_ids=chunk)
+                    await query.message.delete()
                 except Exception:
-                    for mid in reversed(msg_ids):
-                        try:
-                            await context.bot.delete_message(chat_id=chat_id, message_id=mid)
-                        except Exception:
-                            pass
+                    pass
+
+            extra_ids = []
+            if current_msg_id:
+                extra_ids.append(current_msg_id)
+            if context.user_data.get("last_menu_id"):
+                extra_ids.append(context.user_data["last_menu_id"])
+            if context.user_data.get("last_bot_msg_id"):
+                extra_ids.append(context.user_data["last_bot_msg_id"])
+            if context.user_data.get("last_remind_msg_id"):
+                extra_ids.append(context.user_data["last_remind_msg_id"])
+
+            # Purge all messages across chat history (both old and new)
+            await purge_chat_history(
+                bot=context.bot,
+                chat_id=chat_id,
+                current_msg_id=current_msg_id,
+                sweep_depth=None,
+                extra_ids=extra_ids
+            )
                             
             context.user_data.pop("last_remind_msg_id", None)
             context.user_data.pop("last_menu_id", None)
+            context.user_data.pop("last_bot_msg_id", None)
 
-            clean_notice = (
-                f"🧹 *បានសម្អាតសារចាស់ៗដោយជោគជ័យ!* ✨\n\n"
-                f"ឥឡូវនេះការជជែករបស់អ្នកមានសភាពស្អាតបាត និងគ្មានសារចាស់ៗកកកុញទៀតឡើយ។\n"
-                f"សូមជ្រើសរើសមុខងារដែលចង់ប្រើប្រាស់បន្តខាងក្រោម៖"
-            )
+            clean_notice = format_clean_notice_text()
             sent_menu = await context.bot.send_message(
                 chat_id=chat_id,
                 text=clean_notice,
@@ -3363,6 +3377,12 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 parse_mode="Markdown"
             )
             context.user_data["last_menu_id"] = sent_menu.message_id
+            context.user_data["last_bot_msg_id"] = sent_menu.message_id
+            try:
+                from database import record_auto_clean_message
+                record_auto_clean_message(chat_id, sent_menu.message_id)
+            except Exception:
+                pass
 
         elif data == "btn_delete_this_msg":
             try:

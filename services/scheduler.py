@@ -191,31 +191,21 @@ async def scheduled_clear_history_job(context):
         cleaned_chats = 0
         for chat_id in active_chats:
             try:
-                # 1. Fetch tracked messages for this chat
+                from services.chat_cleaner_service import purge_chat_history
                 records = get_auto_clean_messages_for_chat(chat_id)
                 tracked_mids = [r[1] for r in records]
-
-                # 2. Delete tracked messages
-                for mid in tracked_mids:
-                    try:
-                        await context.application.bot.delete_message(chat_id=chat_id, message_id=mid)
-                    except Exception:
-                        pass
-
-                # 3. Sweep backward up to 60 messages from highest known ID to clear untracked user/bot messages
                 highest_id = max(tracked_mids) if tracked_mids else None
-                if highest_id:
-                    sweep_ids = [mid for mid in range(max(1, highest_id - 60), highest_id + 1) if mid not in tracked_mids]
-                    for mid in reversed(sweep_ids):
-                        try:
-                            await context.application.bot.delete_message(chat_id=chat_id, message_id=mid)
-                        except Exception:
-                            pass
 
-                # 4. Clear records from database
-                clear_auto_clean_messages_for_chat(chat_id)
+                # Purge all messages across chat history (both old and new)
+                await purge_chat_history(
+                    bot=context.application.bot,
+                    chat_id=chat_id,
+                    current_msg_id=highest_id,
+                    sweep_depth=600,
+                    extra_ids=tracked_mids
+                )
 
-                # 5. Clear application user_data tracking for this chat if available
+                # Clear application user_data tracking for this chat if available
                 if hasattr(context.application, "user_data") and chat_id in context.application.user_data:
                     context.application.user_data[chat_id].pop("last_bot_msg_id", None)
                     context.application.user_data[chat_id].pop("last_menu_id", None)

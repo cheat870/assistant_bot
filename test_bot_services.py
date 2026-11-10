@@ -396,6 +396,30 @@ def test_clean_chat_and_auto_cleanup():
     expired_after = get_expired_auto_clean_messages(future_cutoff)
     assert not any(e[1] == test_chat and e[2] == 2001 for e in expired_after)
     print("  - Twice-daily (3AM & 12PM) auto-clean database pipeline: OK")
+
+    # Test purge_chat_history service (clear all both old and new)
+    from services.chat_cleaner_service import purge_chat_history, format_clean_notice_text
+    assert "ទាំងចាស់ និងថ្មី" in format_clean_notice_text()
+
+    class MockBot:
+        def __init__(self):
+            self.deleted_chunks = []
+            self.single_deleted = []
+        async def delete_messages(self, chat_id, message_ids):
+            self.deleted_chunks.append((chat_id, list(message_ids)))
+            return True
+        async def delete_message(self, chat_id, message_id):
+            self.single_deleted.append((chat_id, message_id))
+            return True
+
+    mock_bot = MockBot()
+    record_auto_clean_message(test_chat, 501)
+    record_auto_clean_message(test_chat, 502)
+    del_count = asyncio.run(purge_chat_history(mock_bot, test_chat, current_msg_id=50, sweep_depth=100))
+    assert del_count > 0, "Must delete messages"
+    assert len(mock_bot.deleted_chunks) > 0, "Must call delete_messages"
+    assert len(get_auto_clean_messages_for_chat(test_chat)) == 0, "DB records must be cleared"
+    print("  - Purge chat history (both old and new) service: OK")
     print("  [OK] Chat Cleaner & Twice-Daily Auto-Clean verified!")
 
 def test_long_term_memory_service():
