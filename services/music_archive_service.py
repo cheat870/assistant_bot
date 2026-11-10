@@ -1,3 +1,4 @@
+import html
 import logging
 from typing import Optional, Dict, Any, Tuple
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
@@ -70,30 +71,43 @@ async def archive_song_to_channel(
 
         bot_username = getattr(bot, "username", "assistant_bot") or "assistant_bot"
 
-        # Channel post caption
+        # Channel post caption with safe HTML escaping (prevents underscore/bracket Markdown parsing crashes)
         channel_caption = (
-            f"🎧 *{title}*\n"
-            f"👤 *តារាចម្រៀង (Artist):* {performer}\n"
-            f"⏱️ *រយៈពេល (Duration):* {duration_str}\n"
-            f"🔎 *សំណើដោយ (Requested by):* {user_credit}\n\n"
-            f"✨ *ស្តាប់ & ទាញយកចម្រៀងឥតគិតថ្លៃ:* @{bot_username}\n"
-            f"🎵 *Smart Assistant Music Archive*"
+            f"🎧 <b>{html.escape(title)}</b>\n"
+            f"👤 <b>តារាចម្រៀង (Artist):</b> {html.escape(performer)}\n"
+            f"⏱️ <b>រយៈពេល (Duration):</b> {duration_str}\n"
+            f"🔎 <b>សំណើដោយ (Requested by):</b> {html.escape(user_credit)}\n\n"
+            f"✨ <b>ស្តាប់ &amp; ទាញយកចម្រៀងឥតគិតថ្លៃ:</b> @{html.escape(bot_username)}\n"
+            f"🎵 <b>Smart Assistant Music Archive</b>"
         )
 
         channel_markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("🎧 ស្នើសុំបទចម្រៀង (Request Song)", url=f"https://t.me/{bot_username}?start=song")]
         ])
 
-        channel_msg = await bot.send_audio(
-            chat_id=channel_target,
-            audio=sent_audio_file_id,
-            title=title,
-            performer=performer,
-            duration=dur_sec,
-            caption=channel_caption,
-            parse_mode="Markdown",
-            reply_markup=channel_markup
-        )
+        try:
+            channel_msg = await bot.send_audio(
+                chat_id=channel_target,
+                audio=sent_audio_file_id,
+                title=title,
+                performer=performer,
+                duration=dur_sec,
+                caption=channel_caption,
+                parse_mode="HTML",
+                reply_markup=channel_markup
+            )
+        except Exception as e_html:
+            logger.warning(f"HTML send_audio failed, retrying plain text: {e_html}")
+            # Fallback without formatting if HTML still fails
+            channel_msg = await bot.send_audio(
+                chat_id=channel_target,
+                audio=sent_audio_file_id,
+                title=title,
+                performer=performer,
+                duration=dur_sec,
+                caption=f"🎧 {title}\n👤 {performer}\n⏱️ {duration_str}\n🔎 {user_credit}\n\n✨ @{bot_username}",
+                reply_markup=channel_markup
+            )
 
         chat_obj = channel_msg.chat
         post_url = None
