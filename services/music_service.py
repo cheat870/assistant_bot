@@ -9,6 +9,17 @@ import yt_dlp
 
 logger = logging.getLogger(__name__)
 
+def _get_ffmpeg_path() -> Optional[str]:
+    """Find system ffmpeg or imageio-ffmpeg bundled binary."""
+    sys_ffmpeg = shutil.which("ffmpeg")
+    if sys_ffmpeg:
+        return sys_ffmpeg
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
+
 def _clean_music_metadata(raw_title: str, raw_uploader: str) -> tuple[str, str]:
     """Clean up clutter from YouTube/SoundCloud titles and artist names."""
     title = raw_title or "Unknown Title"
@@ -55,16 +66,16 @@ def _clean_music_metadata(raw_title: str, raw_uploader: str) -> tuple[str, str]:
 def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
     """
     Search and download full-length audio (MP3 320kbps / M4A) with smart candidate filtering.
-    - Strategy 1: YouTube 2-stage search (filters out <45s shorts/snippets to guarantee full 3-5min song).
-    - Strategy 2: Multi-query YouTube fallback with 'official audio'.
-    - Strategy 3: SoundCloud fallback with strict duration filter (rejects all 30-second Go+ previews).
+    - Strategy 1: Fast single-step YouTube search & direct download with multi-client anti-bot bypass.
+    - Strategy 2: Multi-query YouTube fallback with 'audio' / 'full song'.
+    - Strategy 3: SoundCloud fallback with DRM protection tolerance & token matching.
     """
     temp_dir = tempfile.mkdtemp(prefix="song_")
     outtmpl = os.path.join(temp_dir, "%(id)s.%(ext)s")
 
-    has_ffmpeg = shutil.which("ffmpeg") is not None
+    ffmpeg_exe = _get_ffmpeg_path()
     postprocessors = []
-    if has_ffmpeg:
+    if ffmpeg_exe:
         postprocessors.append({
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3",
@@ -74,9 +85,9 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
     is_url = query.startswith("http://") or query.startswith("https://")
     is_sc_url = is_url and "soundcloud.com" in query.lower()
 
-    # High-speed options with Android client bypass for datacenter/cloud bot checks
+    # Robust options with multi-client bypass for datacenter/cloud bot checks
     ydl_opts_base = {
-        "format": "bestaudio[ext=m4a]/bestaudio/best",
+        "format": "bestaudio/best[height<=720]/best",
         "outtmpl": outtmpl,
         "noplaylist": True,
         "quiet": True,
@@ -86,11 +97,13 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         "retries": 2,
         "extractor_args": {
             "youtube": {
-                "player_client": ["android", "web"]
+                "player_client": ["android", "ios", "mweb", "web"]
             }
         },
         "postprocessors": postprocessors,
     }
+    if ffmpeg_exe:
+        ydl_opts_base["ffmpeg_location"] = ffmpeg_exe
 
     # 1. Direct SoundCloud URL
     if is_sc_url:
@@ -112,8 +125,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"Direct URL download failed: {e}")
 
-    # 3. Primary Strategy: Fast 1-to-1 YouTube Search with Android Anti-Bot Bypass
-    # Uses ytsearch1 for 1.5s ultra-fast response without datacenter rate limits
+    # 3. Primary Strategy: Fast YouTube Search with Single-Step Direct Download
     yt_search_queries = [
         f"ytsearch1:{query}",
         f"ytsearch1:{query} audio",
@@ -123,7 +135,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
     for search_target in yt_search_queries:
         try:
             with yt_dlp.YoutubeDL(ydl_opts_base) as ydl:
-                info = ydl.extract_info(search_target, download=False)
+                info = ydl.extract_info(search_target, download=True)
                 if not info or "entries" not in info or not info["entries"]:
                     continue
                 entry = info["entries"][0]
@@ -133,32 +145,40 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
                 # Filter out short clips/teasers (< 45 seconds)
                 dur = entry.get("duration") or 0
                 if dur >= 45 or search_target == yt_search_queries[-1]:
-                    # Download the verified full track
-                    web_url = entry.get("webpage_url") or f"https://www.youtube.com/watch?v={entry.get('id')}"
-                    ydl.download([web_url])
                     return _process_downloaded_entry(entry, temp_dir)
         except Exception as e_yt:
             logger.warning(f"YouTube search attempt '{search_target}' failed: {e_yt}")
 
-    # 4. Secondary Strategy: SoundCloud search fallback (strictly >50s, no DRM, and relevant match)
+    # 4. Secondary Strategy: SoundCloud search fallback (strictly >50s, DRM-safe, relevant match)
     try:
         ydl_opts_sc = dict(ydl_opts_base)
         ydl_opts_sc["concurrent_fragment_downloads"] = 5
         with yt_dlp.YoutubeDL(ydl_opts_sc) as ydl:
-            info = ydl.extract_info(f"scsearch3:{query}", download=False)
+            # Process=False extracts playlist entries without evaluating DRM on every track
+            info = ydl.extract_info(f"scsearch5:{query}", download=False, process=False)
             if info and "entries" in info and info["entries"]:
                 query_tokens = [w.lower() for w in re.split(r'[\s\-_|/]+', query) if len(w) >= 3]
-                for sc_entry in info["entries"]:
-                    if not sc_entry or (sc_entry.get("duration") or 0) <= 50 or sc_entry.get("drm"):
+                for raw_entry in info["entries"]:
+                    if not raw_entry:
+                        continue
+                    sc_url = raw_entry.get("url")
+                    if not sc_url:
                         continue
 
-                    sc_text = f"{sc_entry.get('title', '')} {sc_entry.get('uploader', '')}".lower()
-                    # Ensure at least one search token matches SoundCloud title or artist
+                    # Safely probe individual candidate
+                    try:
+                        sc_info = ydl.extract_info(sc_url, download=False)
+                    except Exception:
+                        continue
+                    if not sc_info or (sc_info.get("duration") or 0) <= 50 or sc_info.get("drm"):
+                        continue
+
+                    sc_text = f"{sc_info.get('title', '')} {sc_info.get('uploader', '')}".lower()
                     if query_tokens and not any(t in sc_text for t in query_tokens):
                         continue
 
-                    ydl.process_ie_result(sc_entry, download=True)
-                    return _process_downloaded_entry(sc_entry, temp_dir)
+                    ydl.process_ie_result(sc_info, download=True)
+                    return _process_downloaded_entry(sc_info, temp_dir)
     except Exception as e_sc:
         logger.warning(f"SoundCloud fallback failed: {e_sc}")
 
@@ -170,7 +190,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
     raise ValueError("រកមិនឃើញបទចម្រៀងពេញលេញដែលអ្នកចង់បានឡើយ។ សូមសាកល្បងវាយឈ្មោះបទ ឬឈ្មោះតារាចម្រៀងឱ្យកាន់តែច្បាស់។")
 
 def _process_downloaded_entry(entry: Dict[str, Any], temp_dir: str) -> Dict[str, Any]:
-    """Helper to locate downloaded file and package clean metadata."""
+    """Helper to locate downloaded file, sanitize format for Telegram, and package clean metadata."""
     raw_title = entry.get("title", "Unknown Title")
     raw_uploader = entry.get("uploader") or entry.get("artist") or "Unknown Artist"
     duration = entry.get("duration", 0)
@@ -187,7 +207,23 @@ def _process_downloaded_entry(entry: Dict[str, Any], temp_dir: str) -> Dict[str,
     if not downloaded_files:
         raise FileNotFoundError("បរាជ័យក្នុងការទាញយក file សំឡេង")
 
-    audio_file = downloaded_files[0]
+    # Prefer native audio formats (.mp3, .m4a, .ogg, .flac)
+    audio_candidates = [
+        f for f in downloaded_files
+        if any(f.lower().endswith(ext) for ext in [".mp3", ".m4a", ".ogg", ".flac", ".wav"])
+    ]
+    if audio_candidates:
+        audio_file = audio_candidates[0]
+    else:
+        # If only muxed video/audio (.mp4) was downloaded, rename to .m4a so Telegram accepts it as native audio
+        fallback_file = downloaded_files[0]
+        if fallback_file.lower().endswith(".mp4"):
+            m4a_file = os.path.splitext(fallback_file)[0] + ".m4a"
+            os.rename(fallback_file, m4a_file)
+            audio_file = m4a_file
+        else:
+            audio_file = fallback_file
+
     dur_sec = int(duration) if duration else 0
     duration_min = f"{dur_sec // 60}:{dur_sec % 60:02d}" if dur_sec else "Unknown"
 
