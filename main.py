@@ -73,6 +73,7 @@ from handlers.command_handlers import (
     handle_voice_message,
     handle_photo_message,
     handle_document_image,
+    handle_user_video_message,
     handle_location_message,
     memory_command,
     forget_command,
@@ -262,6 +263,9 @@ def main():
     
     # Register Photo Handler (QR/KHQR & Gemini Vision OCR)
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message, block=False))
+
+    # Register User Video Handler (Video Geolocation AI & Video Tools)
+    app.add_handler(MessageHandler(filters.VIDEO | filters.ANIMATION | filters.VIDEO_NOTE, handle_user_video_message, block=False))
 
     # Register Message Handler for Videos, Links & Continuous AI Chat
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_video_message, block=False))

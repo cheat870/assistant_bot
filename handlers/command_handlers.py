@@ -2034,6 +2034,97 @@ async def handle_document_image(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         logger.error(f"Error handling document image: {e}")
 
+async def handle_user_video_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle user-uploaded video, video note, or animation: extract location (Video Geolocation) or tools."""
+    video = update.message.video or update.message.animation or update.message.video_note
+    if not video:
+        return
+
+    caption = update.message.caption or ""
+    caption_lower = caption.lower()
+
+    await update.message.chat.send_action("typing")
+
+    try:
+        # 1. Check if caption requests MP3 audio extraction
+        if any(k in caption_lower for k in ["/mp3", "mp3", "ចម្រៀង", "audio", "សំឡេង"]):
+            status = await update.message.reply_text("🎵 *កំពុងទាញយកសំឡេង MP3 ចេញពីវីដេអូ...* ⏳", parse_mode="Markdown")
+            tg_file = await context.bot.get_file(video.file_id)
+            vid_bytes = bytes(await tg_file.download_as_bytearray())
+            from services.file_master_service import video_to_mp3_bytes
+            mp3_bytes, mp3_stats = video_to_mp3_bytes(vid_bytes)
+            import io
+            await update.message.reply_audio(
+                audio=io.BytesIO(mp3_bytes),
+                title="Audio from Video",
+                performer="Telegram Assistant Bot",
+                caption=f"🎵 *ទាញយក MP3 ជោគជ័យ!* (`{mp3_stats['mp3_size_kb']} KB`)",
+                parse_mode="Markdown"
+            )
+            try:
+                await status.delete()
+            except Exception:
+                pass
+            return
+
+        # 2. DEFAULT BEHAVIOR: Extract and identify location from the video (Video Geolocation AI)!
+        status = await update.message.reply_text("📍 *កំពុងទាញយក និងវិភាគទីតាំងក្នុងវីដេអូ (Video Geolocation AI)...* 🛰️", parse_mode="Markdown")
+
+        media_bytes = None
+        mime_type = "video/mp4"
+
+        file_size = getattr(video, "file_size", 0) or 0
+        if file_size and file_size <= 20 * 1024 * 1024:
+            try:
+                tg_file = await context.bot.get_file(video.file_id)
+                media_bytes = bytes(await tg_file.download_as_bytearray())
+                mime_type = getattr(video, "mime_type", None) or "video/mp4"
+            except Exception as e_dl:
+                logger.warning(f"Could not download full video for vision: {e_dl}")
+
+        # Fallback to video thumbnail if full video is too large or download failed
+        if not media_bytes:
+            thumb = getattr(video, "thumbnail", None) or getattr(video, "thumb", None)
+            if thumb:
+                try:
+                    tg_thumb = await context.bot.get_file(thumb.file_id)
+                    media_bytes = bytes(await tg_thumb.download_as_bytearray())
+                    mime_type = "image/jpeg"
+                except Exception as e_th:
+                    logger.warning(f"Could not download video thumbnail: {e_th}")
+
+        if not media_bytes:
+            await safe_edit_text(status, "❌ មិនអាចទាញយកទិន្នន័យពីវីដេអូនេះបានទេ (ទំហំធំលើសកំណត់ >20MB)។ សូមសាកល្បងថតជារូបភាពផ្ញើមកវិញណា៎!")
+            return
+
+        vision_loc = await identify_location_via_vision(media_bytes, caption=caption, mime_type=mime_type)
+
+        maps_url = extract_maps_url_from_vision_text(vision_loc)
+        buttons = []
+        if maps_url:
+            buttons.append([InlineKeyboardButton("🗺️ បើកមើលលើ Google Maps", url=maps_url)])
+        buttons.append([
+            InlineKeyboardButton("🧹 សម្អាតសារ", callback_data="btn_clean_chat"),
+            InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+        ])
+
+        await safe_edit_text(status, vision_loc, reply_markup=InlineKeyboardMarkup(buttons))
+
+        # If estimated coordinates in Cambodia were found, send native Telegram map pin
+        import re
+        coords_match = re.search(r"(\d{1,2}\.\d{3,8})[,\s]+(\d{2,3}\.\d{3,8})", vision_loc)
+        if coords_match:
+            try:
+                plat, plon = float(coords_match.group(1)), float(coords_match.group(2))
+                if 9.0 <= plat <= 15.5 and 102.0 <= plon <= 108.0:
+                    await update.message.reply_location(latitude=plat, longitude=plon)
+            except Exception as e_loc:
+                logger.debug(f"Could not reply estimated location pin from video: {e_loc}")
+
+    except Exception as e:
+        logger.error(f"Error handling video message: {e}")
+        await safe_reply_text(update.message, f"❌ កំហុសក្នុងការដំណើរការវីដេអូ៖ {str(e)[:100]}")
+
 # -------------------------------------------------------------
 # Existing Weather, Calendar & Alert Commands
 # -------------------------------------------------------------

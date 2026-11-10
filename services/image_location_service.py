@@ -11,18 +11,20 @@ logger = logging.getLogger(__name__)
 
 VISION_LOCATION_PROMPT = (
     "You are an expert geographical investigator and location identifier specialized in Cambodia and Southeast Asia. "
-    "Carefully analyze this image to identify where it was taken. "
-    "Look for: landmarks, monuments, temple/pagoda architecture, street signs (in Khmer or English), "
-    "shop names, phone numbers (with Cambodian area codes like 012, 098, 088), vehicle license plates, "
+    "Carefully analyze this image or video to identify where it was taken. "
+    "Look for: universities and school campuses (e.g., IFL - Institute of Foreign Languages, RUPP - Royal University of Phnom Penh, "
+    "ITC - Institute of Technology of Cambodia, NUM, RULE, Norton, with elevated walkways/bridges, circular driveway, iconic Vann Molyvann architecture), "
+    "landmarks, monuments, temple/pagoda architecture, ministries, government buildings, street signs (in Khmer or English), "
+    "shop names, phone numbers (with Cambodian area codes like 012, 098, 088, 097), vehicle license plates, "
     "or distinctive natural terrain. "
     "\n\nProvide an informative report in Khmer:\n"
-    "📍 **ការវិភាគទីតាំងពីរូបភាព (AI Photo Geolocation)**\n"
-    "• ឈ្មោះទីតាំង/សំណង់៖ (Identified landmark, pagoda, building, or road)\n"
+    "📍 **ការវិភាគទីតាំងពីរូបភាព/វីដេអូ (AI Geolocation)**\n"
+    "• ឈ្មោះទីតាំង/សំណង់៖ (Identified landmark, university campus, pagoda, building, or road)\n"
     "• ស្រុក/ខណ្ឌ & ខេត្ត/រាជធានី៖ (District/Khan and Province/Capital in Cambodia)\n"
-    "• ការពិពណ៌នា & សញ្ញាសម្គាល់៖ (Details of signs, text, or visual clues spotted in the photo)\n"
-    "• កូអរដោនេប៉ាន់ស្មាន (បើអាច): (Estimated coordinates or Google Maps search keyword)\n\n"
-    "If the photo does not have clear recognizable landmarks or text, politely describe what is visible "
-    "and state that the exact location could not be determined from the image visuals alone."
+    "• ការពិពណ៌នា & សញ្ញាសម្គាល់៖ (Details of signs, architectural clues, bridge/walkway, or visual clues spotted)\n"
+    "• កូអរដោនេប៉ាន់ស្មាន (បើអាច): (Estimated coordinates like 11.5684, 104.8912 or Google Maps search keyword)\n\n"
+    "If the media does not have clear recognizable landmarks, describe what is visible "
+    "and provide the most likely estimated area or campus."
 )
 
 def _to_float(val: Any) -> float:
@@ -117,12 +119,12 @@ def format_photo_gps_message(loc: Dict[str, Any], temp_str: Optional[str] = None
     )
     return msg
 
-async def identify_location_via_vision(image_bytes: bytes, caption: str = "") -> str:
-    """Analyze photo with Gemini Vision AI to identify landmark/location visually."""
+async def identify_location_via_vision(image_bytes: bytes, caption: str = "", mime_type: str = "image/jpeg") -> str:
+    """Analyze photo or video with Gemini Vision AI to identify landmark/location visually."""
     if not (GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here"):
         return (
-            "📍 *ការស្វែងរកទីតាំងពីរូបភាព៖*\n\n"
-            "⚠️ រូបភាពនេះមិនមានទិន្នន័យ EXIF GPS (ដោយសារ Telegram បង្ហាប់រូប)។\n\n"
+            "📍 *ការស្វែងរកទីតាំងពីរូបភាព/វីដេអូ៖*\n\n"
+            "⚠️ មេឌៀនេះមិនមានទិន្នន័យ EXIF GPS (ដោយសារ Telegram បង្ហាប់ទំហំ)។\n\n"
             "💡 *គន្លឹះដើម្បីទាញយក GPS សុក្រឹត ១០០%៖*\n"
             "សូមផ្ញើរូបភាពដោយជ្រើសរើស **File / Document (Uncompressed)** មកកាន់ Bot ណា៎!"
         )
@@ -131,7 +133,7 @@ async def identify_location_via_vision(image_bytes: bytes, caption: str = "") ->
     from google.genai import types
 
     client = genai.Client(api_key=GEMINI_API_KEY)
-    image_part = types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+    media_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
 
     instruction = (
         f"{VISION_LOCATION_PROMPT}\n\n"
@@ -139,7 +141,7 @@ async def identify_location_via_vision(image_bytes: bytes, caption: str = "") ->
     )
 
     try:
-        resp = await asyncio.to_thread(_call_gemini_api, client, [image_part, instruction])
+        resp = await asyncio.to_thread(_call_gemini_api, client, [media_part, instruction])
         reply = resp.text
         reply += (
             "\n\n━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -158,6 +160,12 @@ def extract_maps_url_from_vision_text(text: str) -> Optional[str]:
         
     import re
     import urllib.parse
+
+    invalid_words = [
+        "មិនច្បាស់", "មិនអាចកំណត់", "មិនស្គាល់", "មិនទាន់", "ពុំទាន់", "ពុំអាច",
+        "មិនទាន់អាច", "unknown", "n/a", "none", "unclear", "cannot determine",
+        "not clear", "មិនមាន", "គ្មាន"
+    ]
     
     # 1. Look for lat, lon coordinates (e.g., 11.5564, 104.9282)
     coords_match = re.search(r"(\d{1,2}\.\d{3,8})[,\s]+(\d{2,3}\.\d{3,8})", text)
@@ -175,8 +183,7 @@ def extract_maps_url_from_vision_text(text: str) -> Optional[str]:
     if landmark_match:
         landmark = landmark_match.group(1).strip()
         landmark = re.sub(r"[\*\(\)\[\]]", "", landmark).strip()
-        invalid_words = ["មិនច្បាស់", "មិនអាចកំណត់", "មិនស្គាល់", "unknown", "n/a", "none"]
-        if landmark and not any(w in landmark.lower() for w in invalid_words):
+        if 3 < len(landmark) < 80 and not any(w in landmark.lower() for w in invalid_words):
             return f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(landmark)}"
 
     # 3. Look for district/province line if specific
@@ -184,8 +191,7 @@ def extract_maps_url_from_vision_text(text: str) -> Optional[str]:
     if province_match:
         prov = province_match.group(1).strip()
         prov = re.sub(r"[\*\(\)\[\]]", "", prov).strip()
-        invalid_words = ["មិនច្បាស់", "មិនអាចកំណត់", "មិនស្គាល់", "unknown", "n/a"]
-        if prov and not any(w in prov.lower() for w in invalid_words):
+        if 3 < len(prov) < 80 and not any(w in prov.lower() for w in invalid_words):
             return f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(prov)}"
 
     return None
