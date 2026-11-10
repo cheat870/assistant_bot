@@ -93,6 +93,7 @@ from handlers.command_handlers import (
     crypto_command,
     alert_command,
     alerts_list_command,
+    content_command,
     button_callback_handler,
 )
 from handlers.video_handlers import handle_video_message
@@ -276,6 +277,12 @@ def main():
     app.add_handler(CommandHandler("alert", alert_command, block=False))
     app.add_handler(CommandHandler("alerts", alerts_list_command, block=False))
     app.add_handler(CommandHandler("myalerts", alerts_list_command, block=False))
+
+    # AI Content Creator Studio (Facebook, TikTok & Hashtags)
+    app.add_handler(CommandHandler("content", content_command, block=False))
+    app.add_handler(CommandHandler("caption", content_command, block=False))
+    app.add_handler(CommandHandler("post", content_command, block=False))
+    app.add_handler(CommandHandler("script", content_command, block=False))
     
     # Register Callback Query Handler for Buttons
     app.add_handler(CallbackQueryHandler(button_callback_handler, block=False))

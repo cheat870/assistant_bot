@@ -238,14 +238,15 @@ def get_main_menu_keyboard(chat_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton("🎸 Chord តន្ត្រី (/chord)", callback_data="btn_chord_help"),
         ],
         [
+            InlineKeyboardButton("🎬 AI Content Studio (/caption)", callback_data="btn_content_help"),
             InlineKeyboardButton("🛠️ ឧបករណ៍ QR / KHQR", callback_data="btn_tools_menu"),
+        ],
+        [
             InlineKeyboardButton(auto_clean_text, callback_data="btn_toggle_autoclean"),
-        ],
-        [
             InlineKeyboardButton("🧹 សម្អាតសារភ្លាមៗ (/clean)", callback_data="btn_clean_chat"),
-            InlineKeyboardButton("💡 ការណែនាំ (Help)", callback_data="btn_help"),
         ],
         [
+            InlineKeyboardButton("💡 ការណែនាំ (Help)", callback_data="btn_help"),
             InlineKeyboardButton("✨ ជំនួយការ AI (Gemini)", callback_data="btn_ai_menu"),
         ]
     ]
@@ -268,6 +269,23 @@ def get_crypto_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("🔄 Refresh តម្លៃ", callback_data="btn_crypto_refresh"),
+            InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main"),
+        ]
+    ])
+
+def get_content_keyboard(active_mode: str = "all") -> InlineKeyboardMarkup:
+    """Action keyboard for AI Social Content & TikTok Script Studio."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🛍️ Facebook Post", callback_data="btn_content_view_fb"),
+            InlineKeyboardButton("🎬 TikTok Script", callback_data="btn_content_view_tiktok"),
+        ],
+        [
+            InlineKeyboardButton("📋 មើលទាំងអស់ (All)", callback_data="btn_content_view_all"),
+            InlineKeyboardButton("🔄 បង្កើតថ្មី (Regenerate)", callback_data="btn_content_regen"),
+        ],
+        [
+            InlineKeyboardButton("💡 របៀបប្រើ / គំរូ", callback_data="btn_content_help"),
             InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main"),
         ]
     ])
@@ -1386,6 +1404,58 @@ async def alerts_list_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     await send_clean_response(update, context, "\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
 
+async def content_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handle /content, /caption, /post, /script to generate high-converting
+    Facebook sales posts, 15s TikTok scripts, and trending hashtags from text or photos.
+    """
+    message = update.message
+    chat_id = update.effective_chat.id
+    raw_args = " ".join(context.args) if context.args else ""
+
+    # Check if command is attached to or replies to a photo
+    image_bytes = None
+    target_photo = None
+    if message and message.photo:
+        target_photo = message.photo[-1]
+    elif message and message.reply_to_message and message.reply_to_message.photo:
+        target_photo = message.reply_to_message.photo[-1]
+        if not raw_args and message.reply_to_message.caption:
+            raw_args = message.reply_to_message.caption
+
+    if target_photo:
+        try:
+            tg_file = await context.bot.get_file(target_photo.file_id)
+            image_bytes = bytes(await tg_file.download_as_bytearray())
+        except Exception as e:
+            logger.debug(f"Could not download photo for content creator: {e}")
+
+    if not raw_args and not image_bytes:
+        tip = (
+            "🎬 *[AI Content Creator Studio]* ✨\n\n"
+            "ជំនួយការឆ្លាតវៃសម្រាប់ **អ្នកលក់អនឡាញ & TikToker** ជួយសរសេរ Caption ផុសលក់ដាច់, Script វីដេអូខ្លី ១៥ វិនាទី, និង Hashtags ល្បីៗស្វ័យប្រវត្តិ!\n\n"
+            "💡 *របៀបប្រើប្រាស់ងាយៗ៖*\n"
+            "• វាយ៖ `/caption <ឈ្មោះទំនិញ ឬប្រធានបទ>`\n"
+            "   (ឧ. `/caption កាហ្វេដូងក្រអូប រសជាតិថ្មី`)\n"
+            "   (ឧ. `/caption ឡេលាបស្បែក ស ភ្លឺថ្លាក្នុង ៧ ថ្ងៃ`)\n"
+            "   (ឧ. `/caption អាវយឺតដៃខ្លី Oversize សាច់ត្រជាក់`)\n\n"
+            "📸 *ឬគ្រាន់តែផ្ញើរូបថតផលិតផល* ដោយសរសេរភ្ជាប់ `/caption` ➔ AI នឹងស្កេនមើលផលិតផលក្នុងរូបភាព រួចរៀបចំ Caption និង Script វីដេអូជូនភ្លាមៗ! 🚀"
+        )
+        await send_clean_response(update, context, tip, reply_markup=get_back_keyboard())
+        return
+
+    topic = raw_args or "ផលិតផលក្នុងរូបភាព"
+    status = await message.reply_text("✨ *AI កំពុងវិភាគ និងរៀបចំ Caption លក់ & Script TikTok...* ⏳", parse_mode="Markdown")
+
+    from services.content_creator_service import generate_social_content, format_content_card
+    content_data = await generate_social_content(topic=topic, image_bytes=image_bytes)
+
+    # Cache content data in user_data for quick view switching (FB / TikTok / All)
+    context.user_data["last_content_data"] = content_data
+
+    card_text = format_content_card(content_data, view_mode="all")
+    await safe_edit_text(status, card_text, reply_markup=get_content_keyboard("all"))
+
 async def clear_expenses_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Clear all expense records for this chat: /clear_expenses."""
     chat_id = update.effective_chat.id
@@ -2103,6 +2173,17 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 await update.message.reply_location(latitude=lat, longitude=lon)
             except Exception as e_loc:
                 logger.warning(f"Could not send native location: {e_loc}")
+            return
+
+        # Check if caption explicitly requests AI Content Creator Studio (Facebook/TikTok)
+        if any(k in caption_lower for k in ["/caption", "/content", "/post", "/script", "caption", "សរសេរ caption", "ផុសលក់"]):
+            status = await update.message.reply_text("🎬 *AI កំពុងវិភាគរូបភាពផលិតផល និងរៀបចំ Caption លក់ & Script TikTok...* ⏳", parse_mode="Markdown")
+            from services.content_creator_service import generate_social_content, format_content_card
+            topic = caption.replace("/caption", "").replace("/content", "").replace("/post", "").replace("/script", "").strip() or "ផលិតផលក្នុងរូបភាព"
+            content_data = await generate_social_content(topic=topic, image_bytes=img_bytes)
+            context.user_data["last_content_data"] = content_data
+            card_text = format_content_card(content_data, view_mode="all")
+            await safe_edit_text(status, card_text, reply_markup=get_content_keyboard("all"))
             return
 
         # Check if caption explicitly requests car dashboard diagnostic
@@ -3619,6 +3700,44 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             from services.user_resolver_service import validate_username_format
             _, _, tip = validate_username_format("")
             await query.edit_message_text(text=tip, reply_markup=get_back_keyboard(), parse_mode="Markdown")
+
+        elif data.startswith("btn_content_view_"):
+            view_mode = data.replace("btn_content_view_", "")
+            await query.answer()
+            last_content = context.user_data.get("last_content_data")
+            if not last_content:
+                from services.content_creator_service import generate_fallback_content
+                last_content = generate_fallback_content("ផលិតផលគុណភាពខ្ពស់")
+            from services.content_creator_service import format_content_card
+            card_text = format_content_card(last_content, view_mode=view_mode)
+            await query.edit_message_text(text=card_text, reply_markup=get_content_keyboard(view_mode), parse_mode="Markdown")
+
+        elif data == "btn_content_regen":
+            await query.answer("🔄 កំពុងបង្កើតមាតិកាថ្មី...")
+            last_content = context.user_data.get("last_content_data", {})
+            topic = last_content.get("topic", "ផលិតផលគុណភាពខ្ពស់")
+            from services.content_creator_service import generate_social_content, format_content_card
+            new_content = await generate_social_content(topic=topic, style="engaging")
+            context.user_data["last_content_data"] = new_content
+            card_text = format_content_card(new_content, view_mode="all")
+            await query.edit_message_text(text=card_text, reply_markup=get_content_keyboard("all"), parse_mode="Markdown")
+
+        elif data == "btn_content_help":
+            await query.answer()
+            tip = (
+                "🎬 *[AI Content Creator Studio - ការណែនាំ]* ✨\n\n"
+                "ជួយអ្នកលក់អនឡាញ & TikToker សរសេរ Caption លក់ដាច់, Script វីដេអូខ្លី ១៥ វិនាទី, និង Hashtags ល្បីៗស្វ័យប្រវត្តិ!\n\n"
+                "💡 *របៀបប្រើប្រាស់៖*\n"
+                "• វាយ៖ `/caption <ឈ្មោះទំនិញ ឬប្រធានបទ>`\n"
+                "   (ឧ. `/caption កាហ្វេដូងក្រអូប`)\n"
+                "   (ឧ. `/caption ឡេលាបស្បែក ស ភ្លឺថ្លា`)\n"
+                "   (ឧ. `/caption អាវយឺតដៃខ្លី Oversize`)\n\n"
+                "📸 *ឬគ្រាន់តែផ្ញើរូបថតផលិតផល* ដោយសរសេរភ្ជាប់ `/caption` ➔ AI នឹងស្កេនមើលផលិតផលក្នុងរូបភាព រួចរៀបចំ Caption និង Script វីដេអូជូនភ្លាមៗ! 🚀"
+            )
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
 
         elif data == "btn_toggle_autoclean":
             from database import is_auto_clean_enabled, set_auto_clean_enabled

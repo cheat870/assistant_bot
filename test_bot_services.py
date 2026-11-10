@@ -911,6 +911,44 @@ async def test_crypto_price_watcher_and_alerts_async():
     print("  - Deleted crypto alert successfully: OK")
     print("  [OK] Crypto, TON & Gold Live Price Watcher & Alerts verified!")
 
+async def test_ai_content_creator_studio_async():
+    print("\n[27] Testing AI Content Creator Studio (FB Sales Post, TikTok Script & Hashtags)...")
+    from services.content_creator_service import (
+        generate_fallback_content,
+        generate_social_content,
+        format_content_card
+    )
+
+    # 1. Test fallback structured generator
+    topic = "កាហ្វេដូងក្រអូប"
+    content = generate_fallback_content(topic, "sales")
+    assert "កាហ្វេដូងក្រអូប" in content["fb_post"]
+    assert "ប្រូម៉ូសិន" in content["fb_post"]
+    assert "0s - 3s" in content["tiktok_script"]
+    assert "#Cambodia" in content["hashtags"]
+    assert "#fyp" in content["hashtags"]
+    print(f"  - Structured Khmer sales copywriting & 15s TikTok script generated: OK")
+
+    # 2. Test view mode card formatting
+    card_all = format_content_card(content, view_mode="all")
+    assert "Facebook & Telegram Post" in card_all
+    assert "TikTok / Reels" in card_all
+
+    card_fb = format_content_card(content, view_mode="fb")
+    assert "Facebook & Telegram Sales Post" in card_fb
+
+    card_tt = format_content_card(content, view_mode="tiktok")
+    assert "TikTok & Reels Video Script" in card_tt
+    print("  - Formatted Facebook post, TikTok script & Hashtags cards: OK")
+
+    # 3. Test generate_social_content pipeline
+    res = await generate_social_content("អាវយឺតដៃខ្លី Oversize", style="engaging")
+    assert "fb_post" in res and len(res["fb_post"]) > 50
+    assert "tiktok_script" in res and len(res["tiktok_script"]) > 30
+    assert "hashtags" in res and "#" in res["hashtags"]
+    print("  - Content generation pipeline verified: OK")
+    print("  [OK] AI Content Creator Studio verified!")
+
 if __name__ == "__main__":
     test_holiday_calendar()
     test_database()
@@ -938,4 +976,5 @@ if __name__ == "__main__":
     test_two_way_voice_assistant()
     asyncio.run(test_telegram_user_resolver_async())
     asyncio.run(test_crypto_price_watcher_and_alerts_async())
-    print("\n🎉 ALL 26 TEST SUITES PASSED SUCCESSFULLY! ✅")
+    asyncio.run(test_ai_content_creator_studio_async())
+    print("\n🎉 ALL 27 TEST SUITES PASSED SUCCESSFULLY! ✅")

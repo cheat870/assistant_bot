@@ -138,6 +138,10 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
         from handlers.command_handlers import crypto_command
         await crypto_command(update, context)
         return
+    elif any(k in norm_text for k in ["សរសេរ caption", "caption", "Content", "content", "ផុសលក់", "tiktok script"]) or norm_lower in ["caption", "/caption", "content", "/content", "post", "/post", "script", "/script"]:
+        from handlers.command_handlers import content_command
+        await content_command(update, context)
+        return
     elif any(k in norm_text for k in ["រំលឹក"]) or any(k in norm_lower for k in ["reminders", "reminder"]):
         await reminders_command(update, context)
         return
