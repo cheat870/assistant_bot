@@ -85,16 +85,16 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
     is_url = query.startswith("http://") or query.startswith("https://")
     is_sc_url = is_url and "soundcloud.com" in query.lower()
 
-    # Robust options with android client bypass for datacenter/cloud bot checks
+    # Robust options with android client bypass & browser TLS impersonation for cloud datacenter checks
     ydl_opts_base = {
         "format": "bestaudio/best",
         "outtmpl": outtmpl,
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
-        "ignoreerrors": True,
-        "socket_timeout": 15,
-        "retries": 2,
+        "ignoreerrors": False,
+        "socket_timeout": 20,
+        "retries": 3,
         "extractor_args": {
             "youtube": {
                 "player_client": ["android"]
@@ -104,6 +104,13 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
     }
     if ffmpeg_exe:
         ydl_opts_base["ffmpeg_location"] = ffmpeg_exe
+
+    # Enable Chrome TLS impersonation via curl-cffi for cloud datacenter bypass
+    try:
+        from yt_dlp.networking.impersonate import ImpersonateTarget
+        ydl_opts_base["impersonate"] = ImpersonateTarget.from_str("chrome")
+    except Exception as e_imp:
+        logger.debug(f"ImpersonateTarget unavailable: {e_imp}")
 
     # 1. Direct SoundCloud URL
     if is_sc_url:
@@ -144,9 +151,10 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
 
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(search_target, download=True)
-                    if not info or "entries" not in info or not info["entries"]:
+                    if not info:
                         continue
-                    entry = info["entries"][0]
+                    entries = info.get("entries")
+                    entry = entries[0] if (entries is not None and len(entries) > 0) else info
                     if not entry:
                         continue
 
