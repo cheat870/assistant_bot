@@ -140,15 +140,23 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         except Exception as e_yt:
             logger.warning(f"YouTube search attempt '{search_target}' failed: {e_yt}")
 
-    # 4. Secondary Strategy: SoundCloud search fallback (strictly >50s, no DRM)
+    # 4. Secondary Strategy: SoundCloud search fallback (strictly >50s, no DRM, and relevant match)
     try:
         ydl_opts_sc = dict(ydl_opts_base)
         ydl_opts_sc["concurrent_fragment_downloads"] = 5
         with yt_dlp.YoutubeDL(ydl_opts_sc) as ydl:
-            info = ydl.extract_info(f"scsearch1:{query}", download=False)
+            info = ydl.extract_info(f"scsearch3:{query}", download=False)
             if info and "entries" in info and info["entries"]:
-                sc_entry = info["entries"][0]
-                if sc_entry and (sc_entry.get("duration") or 0) > 50 and not sc_entry.get("drm"):
+                query_tokens = [w.lower() for w in re.split(r'[\s\-_|/]+', query) if len(w) >= 3]
+                for sc_entry in info["entries"]:
+                    if not sc_entry or (sc_entry.get("duration") or 0) <= 50 or sc_entry.get("drm"):
+                        continue
+
+                    sc_text = f"{sc_entry.get('title', '')} {sc_entry.get('uploader', '')}".lower()
+                    # Ensure at least one search token matches SoundCloud title or artist
+                    if query_tokens and not any(t in sc_text for t in query_tokens):
+                        continue
+
                     ydl.process_ie_result(sc_entry, download=True)
                     return _process_downloaded_entry(sc_entry, temp_dir)
     except Exception as e_sc:
