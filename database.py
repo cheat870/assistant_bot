@@ -1,8 +1,11 @@
 import os
 import sqlite3
+import logging
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta
 from config import DB_PATH
+
+logger = logging.getLogger(__name__)
 
 def init_db():
     """Initialize database tables."""
@@ -855,4 +858,34 @@ def get_database_info() -> Dict[str, Any]:
         "database_url_configured": bool(db_url),
         "sqlite_path": str(DB_PATH),
     }
+
+def find_users_in_db(query: str) -> List[Dict[str, Any]]:
+    """Search registered users/chats in local database by username or chat_id."""
+    clean_q = query.lstrip("@").strip().lower()
+    if not clean_q:
+        return []
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT chat_id, username, chat_type, subscribed_at
+            FROM alert_subscribers
+            WHERE LOWER(username) LIKE ? OR CAST(chat_id AS TEXT) = ?
+            LIMIT 10
+        """, (f"%{clean_q}%", clean_q))
+        rows = cursor.fetchall()
+        conn.close()
+        return [
+            {
+                "chat_id": r[0],
+                "username": r[1],
+                "chat_type": r[2],
+                "subscribed_at": r[3]
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.warning(f"Error querying alert_subscribers: {e}")
+        return []
+
 

@@ -89,6 +89,7 @@ from handlers.command_handlers import (
     excel_command,
     listen_podcast_command,
     chord_command,
+    user_command,
     button_callback_handler,
 )
 from handlers.video_handlers import handle_video_message
@@ -111,6 +112,7 @@ async def post_init(application: Application):
         BotCommand("excel", "📈 ទាញយកប្រវត្តិចំណាយជា Excel"),
         BotCommand("listen", "🎧 Web Article ➔ Audio Podcast"),
         BotCommand("chord", "🎸 ស្វែងរក Chord ហ្គីតា/ព្យាណូ"),
+        BotCommand("user", "👤 ស្វែងរក & បង្កើត Link Profile"),
         BotCommand("spend", "💸 កត់ត្រាចំណាយ (Log Expense)"),
         BotCommand("income", "💰 កត់ត្រាចំណូល (Log Income)"),
         BotCommand("song", "🎧 ស្វែងរកចម្រៀង MP3 (Music Finder)"),
@@ -257,6 +259,11 @@ def main():
 
     # Music Chords & Song Finder
     app.add_handler(CommandHandler("chord", chord_command, block=False))
+
+    # Telegram Profile Resolver (1-Click Chat Link Generator)
+    app.add_handler(CommandHandler("user", user_command, block=False))
+    app.add_handler(CommandHandler("whois", user_command, block=False))
+    app.add_handler(CommandHandler("profile", user_command, block=False))
     
     # Register Callback Query Handler for Buttons
     app.add_handler(CallbackQueryHandler(button_callback_handler, block=False))

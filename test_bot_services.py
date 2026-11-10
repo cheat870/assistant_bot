@@ -737,6 +737,57 @@ def test_two_way_voice_assistant():
     print(f"  - Synthesized Khmer voice audio response ({len(data):,} bytes): OK")
     print("  [OK] Two-Way Voice Assistant verified!")
 
+async def test_telegram_user_resolver_async():
+    print("\n[25] Testing Telegram Profile Resolver & 1-Click Link Generator...")
+    from services.user_resolver_service import (
+        extract_telegram_username,
+        validate_username_format,
+        resolve_telegram_user,
+        format_user_resolver_card,
+    )
+    from database import init_db, add_subscriber, find_users_in_db
+    init_db()
+
+    # 1. Test username extraction from various formats
+    assert extract_telegram_username("heamlyheak") == "heamlyheak"
+    assert extract_telegram_username("@heamlyheak") == "heamlyheak"
+    assert extract_telegram_username("https://t.me/heamlyheak") == "heamlyheak"
+    assert extract_telegram_username("t.me/heamlyheak") == "heamlyheak"
+    assert extract_telegram_username("tg://resolve?domain=heamlyheak") == "heamlyheak"
+    assert extract_telegram_username("invalid space username") is None
+    print("  - Extracted clean usernames from raw text, @mentions, web URLs, and deep links: OK")
+
+    # 2. Test format validation
+    is_valid, clean, err = validate_username_format("")
+    assert not is_valid and "របៀបប្រើប្រាស់" in err
+
+    is_valid, clean, err = validate_username_format("heamlyheak")
+    assert is_valid and clean == "heamlyheak"
+    print("  - Username format validation: OK")
+
+    # 3. Test local database search
+    add_subscriber(777666, "heamlyheak_test", "private")
+    matches = find_users_in_db("heamlyheak_test")
+    assert len(matches) > 0
+    assert matches[0]["username"] == "heamlyheak_test"
+    print(f"  - Searched user in local database: found {len(matches)} match: OK")
+
+    # 4. Test profile resolution and card formatting
+    res = await resolve_telegram_user(None, "heamlyheak")
+    assert res["valid"] is True
+    assert res["url_https"] == "https://t.me/heamlyheak"
+    assert res["url_tg"] == "tg://resolve?domain=heamlyheak"
+
+    card_text, kb = format_user_resolver_card(res)
+    assert "@heamlyheak" in card_text
+    assert "t.me/heamlyheak" in card_text
+    assert len(kb.inline_keyboard) >= 2
+    # Verify the 1-click button URL
+    btn_url = kb.inline_keyboard[0][0].url
+    assert btn_url == "https://t.me/heamlyheak"
+    print(f"  - Profile card & 1-Click inline buttons generated: OK")
+    print("  [OK] Telegram Profile Resolver verified!")
+
 if __name__ == "__main__":
     test_holiday_calendar()
     test_database()
@@ -762,4 +813,5 @@ if __name__ == "__main__":
     asyncio.run(test_podcast_service_async())
     asyncio.run(test_chord_music_service_async())
     test_two_way_voice_assistant()
-    print("\n🎉 ALL 24 TEST SUITES PASSED SUCCESSFULLY! ✅")
+    asyncio.run(test_telegram_user_resolver_async())
+    print("\n🎉 ALL 25 TEST SUITES PASSED SUCCESSFULLY! ✅")

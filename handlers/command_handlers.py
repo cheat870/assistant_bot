@@ -103,6 +103,11 @@ from services.receipt_budget_service import (
 )
 from services.podcast_service import generate_article_podcast
 from services.chord_music_service import find_song_chords, identify_song_from_audio
+from services.user_resolver_service import (
+    validate_username_format,
+    resolve_telegram_user,
+    format_user_resolver_card,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1192,6 +1197,22 @@ async def chord_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
     ])
     await safe_edit_text(status, chord_sheet, reply_markup=kb)
+
+async def user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Resolve Telegram username and create 1-click chat links: /user <username> or /whois <username>."""
+    text = update.message.text or ""
+    parts = text.split(maxsplit=1)
+    query = parts[1].strip() if len(parts) > 1 else ""
+
+    if not query:
+        _, _, tip = validate_username_format("")
+        await send_clean_response(update, context, tip, reply_markup=get_back_keyboard())
+        return
+
+    status = await update.message.reply_text("🔍 *កំពុងផ្ទៀងផ្ទាត់ និងបង្កើតផ្លូវកាត់ Profile...* ⏳", parse_mode="Markdown")
+    profile_data = await resolve_telegram_user(context.bot, query)
+    card_text, keyboard = format_user_resolver_card(profile_data)
+    await safe_edit_text(status, card_text, reply_markup=keyboard)
 
 async def clear_expenses_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Clear all expense records for this chat: /clear_expenses."""
@@ -2394,6 +2415,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔹 `/enhance` - ធ្វើឱ្យរូបភាពច្បាស់ HD\n"
         "🔹 `/watermark` - បោះត្រាការពាររូបភាពផលិតផល\n"
         "🔹 `/pdf` - Chat with PDF សង្ខេប និងឆ្លើយសំណួរ\n"
+        "🔹 `/user <username>` - ស្វែងរក & បង្កើត Link ឆាតទៅកាន់ Profile\n"
         "🔹 `/status` - ពិនិត្យស្ថានភាពគណនី\n\n"
         "📸 *Receipt Scanner:* ថតរូបវិក្កយបត្រ ឬស្លីបបង់ប្រាក់ ➔ AI កត់ចំណាយស្វ័យប្រវត្តិ!\n"
         "🗣️ *Voice Assistant:* ផ្ញើសារសំឡេង Voice Note ➔ Bot ឆ្លើយតបជាសំឡេងនិយាយខ្មែរ!\n"
@@ -2765,12 +2787,24 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 "📷 *២. អាន QR Code & KHQR ធនាគារ៖*\n"
                 "• ផ្ញើរូបភាព QR Code ឬ KHQR ចូលក្នុង Bot នេះភ្លាមៗ\n"
                 "• Bot នឹងទាញយកទិន្នន័យពីក្នុងរូបភាពនោះជូន\n\n"
-                "🎙️ *៣. ជជែកជាសំឡេង (Voice AI)៖*\n"
+                "👤 *៣. Telegram Profile Resolver (ស្វែងរកគណនី)៖*\n"
+                "• វាយ `/user <username>` ឬ `/whois <username>`\n"
+                "• បង្កើត Link ឆាតទៅកាន់ Profile ភ្លាមៗមួយចុច (1-Click Chat)!\n\n"
+                "🎙️ *៤. ជជែកជាសំឡេង (Voice AI)៖*\n"
                 "• គ្រាន់តែសង្កត់ផ្ញើសារសំឡេង Voice Note នោះ AI នឹងឆ្លើយតបមកវិញ\n\n"
-                "📄 *៤. Vision AI & OCR៖*\n"
+                "📄 *៥. Vision AI & OCR៖*\n"
                 "• ផ្ញើរូបភាពឯកសារ វិក្កយបត្រ ឬលំហាត់ ➔ AI ជួយអាន និងដោះស្រាយ"
             )
-            await query.edit_message_text(tools_msg, reply_markup=get_back_keyboard(), parse_mode="Markdown")
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("👤 ស្វែងរកគណនី (/user)", callback_data="btn_user_help")],
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await query.edit_message_text(tools_msg, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_user_help":
+            await query.answer()
+            _, _, tip = validate_username_format("")
+            await query.edit_message_text(tip, reply_markup=get_back_keyboard(), parse_mode="Markdown")
 
         elif data == "btn_weather_now":
             await query.answer("កំពុងទាញយកព័ត៌មានអាកាសធាតុ...")
