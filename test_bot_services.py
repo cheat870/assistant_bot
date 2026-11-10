@@ -624,6 +624,119 @@ def test_code_runner_sandbox():
     print("  - Formatted execution result markdown card: OK")
     print("  [OK] Python Code Runner Sandbox verified!")
 
+def test_receipt_scanner_and_budget_export():
+    print("\n[21] Testing AI Receipt Scanner, Pie Chart & Excel (.xlsx) Generator...")
+    from services.receipt_budget_service import (
+        record_receipt_transaction,
+        generate_budget_pie_chart,
+        generate_budget_excel,
+    )
+    import zipfile
+    import io
+
+    test_chat = 888777
+    sample_receipt = {
+        "is_receipt": True,
+        "merchant": "Amazon Cafe IFL",
+        "amount": 4.50,
+        "currency": "USD",
+        "category": "អាហារ និងភេសជ្ជៈ 🍜",
+        "date": "2026-11-10",
+        "items": ["Iced Latte", "Butter Croissant"],
+        "summary_km": "ទិញកាហ្វេ និងនំពេលព្រឹក"
+    }
+
+    # 1. Test receipt transaction recording
+    msg = record_receipt_transaction(test_chat, sample_receipt)
+    assert "Amazon Cafe IFL" in msg
+    assert "4.50 $" in msg
+    assert "Iced Latte" in msg
+    print("  - Recorded parsed receipt transaction to DB: OK")
+
+    # 2. Test Donut/Pie Chart image generation
+    chart_bytes = generate_budget_pie_chart(test_chat)
+    assert chart_bytes is not None
+    assert len(chart_bytes) > 2000
+    assert chart_bytes[:4] == b"\x89PNG"
+    print(f"  - Generated Donut/Pie Chart PNG ({len(chart_bytes):,} bytes): OK")
+
+    # 3. Test authentic OpenXML Excel (.xlsx) generation
+    excel_bytes = generate_budget_excel(test_chat)
+    assert excel_bytes is not None
+    assert len(excel_bytes) > 500
+    with zipfile.ZipFile(io.BytesIO(excel_bytes)) as zf:
+        names = zf.namelist()
+        assert "[Content_Types].xml" in names
+        assert "xl/worksheets/sheet1.xml" in names
+        assert "xl/workbook.xml" in names
+        sheet_content = zf.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        assert "Amazon Cafe IFL" in sheet_content
+        assert "4.5" in sheet_content
+    print(f"  - Generated pure OpenXML Excel (.xlsx) ({len(excel_bytes):,} bytes): OK")
+    print("  [OK] Receipt Scanner, Chart & Excel verified!")
+
+async def test_podcast_service_async():
+    print("\n[22] Testing Web Article to Audio Podcast Service...")
+    from services.podcast_service import (
+        extract_article_content_from_url,
+        generate_article_podcast,
+        PODCAST_PROMPT,
+    )
+
+    assert "===SUMMARY===" in PODCAST_PROMPT
+    assert "===SPOKEN===" in PODCAST_PROMPT
+    assert "{Title in Khmer}" in PODCAST_PROMPT
+
+    # Test error handling with unreachable URL
+    res = await generate_article_podcast("https://invalid-non-existent-domain-123456.com")
+    assert "success" in res
+    assert res["success"] is False
+    assert "មិនអាចទាញយកខ្លឹមសារ" in res["bullet_summary"]
+    print("  - Handled invalid/unreachable URL cleanly: OK")
+    print("  [OK] Web Article to Podcast verified!")
+
+async def test_chord_music_service_async():
+    print("\n[23] Testing Guitar/Piano Chord Finder & Shazam...")
+    from services.chord_music_service import (
+        find_song_chords,
+        identify_song_from_audio,
+        CHORD_PROMPT,
+        AUDIO_SHAZAM_PROMPT,
+    )
+
+    assert "Key" in CHORD_PROMPT
+    assert "Strumming Pattern" in CHORD_PROMPT
+    assert "Shazam" in AUDIO_SHAZAM_PROMPT
+
+    # 1. Test empty query validation
+    empty_res = await find_song_chords("")
+    assert "សូមវាយឈ្មោះបទចម្រៀង" in empty_res
+    print("  - Empty song query validation: OK")
+
+    # 2. Test chords retrieval
+    chords = await find_song_chords("ចិត្តអើយ")
+    assert len(chords) > 30
+    assert "Key" in chords or "Chord" in chords
+    print("  - Generated guitar/piano chord sheet: OK")
+
+    # 3. Test Shazam prompt and structure
+    shazam_offline = await identify_song_from_audio(b"dummy_audio_bytes", mime_type="audio/ogg")
+    assert len(shazam_offline) > 10
+    print("  - Shazam audio identifier pipeline verified: OK")
+    print("  [OK] Chord Finder & Shazam verified!")
+
+def test_two_way_voice_assistant():
+    print("\n[24] Testing Two-Way Voice Assistant (Khmer Speech Synthesis)...")
+    from services.tts_service import generate_tts_audio
+
+    khmer_prompt = "សួស្តី! ខ្ញុំជាជំនួយការឆ្លាតវៃ Telegram របស់អ្នក។ ខ្ញុំអាចជួយលោកអ្នកបានគ្រប់ពេលវេលា!"
+    fp = generate_tts_audio(khmer_prompt, lang="km")
+    assert fp is not None
+    data = fp.read()
+    assert len(data) > 1000
+    print(f"  - Synthesized Khmer voice audio response ({len(data):,} bytes): OK")
+    print("  [OK] Two-Way Voice Assistant verified!")
+
 if __name__ == "__main__":
     test_holiday_calendar()
     test_database()
@@ -645,4 +758,8 @@ if __name__ == "__main__":
     test_file_master_service()
     test_camroad_trip_planner()
     test_code_runner_sandbox()
-    print("\n🎉 ALL 20 TEST SUITES PASSED SUCCESSFULLY! ✅")
+    test_receipt_scanner_and_budget_export()
+    asyncio.run(test_podcast_service_async())
+    asyncio.run(test_chord_music_service_async())
+    test_two_way_voice_assistant()
+    print("\n🎉 ALL 24 TEST SUITES PASSED SUCCESSFULLY! ✅")

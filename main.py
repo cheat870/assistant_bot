@@ -85,6 +85,10 @@ from handlers.command_handlers import (
     code_command,
     run_code_command,
     debug_code_command,
+    chart_command,
+    excel_command,
+    listen_podcast_command,
+    chord_command,
     button_callback_handler,
 )
 from handlers.video_handlers import handle_video_message
@@ -103,6 +107,10 @@ async def post_init(application: Application):
         BotCommand("briefing", "👑 សង្ខេបពេលព្រឹក VIP (Morning Briefing)"),
         BotCommand("compress", "🗜️ បង្រួម & បម្លែងឯកសារ (File Master)"),
         BotCommand("budget", "📊 ចំណូល-ចំណាយ (Expense Tracker)"),
+        BotCommand("chart", "📊 ក្រាហ្វិកចំណាយ (Donut/Pie Chart)"),
+        BotCommand("excel", "📈 ទាញយកប្រវត្តិចំណាយជា Excel"),
+        BotCommand("listen", "🎧 Web Article ➔ Audio Podcast"),
+        BotCommand("chord", "🎸 ស្វែងរក Chord ហ្គីតា/ព្យាណូ"),
         BotCommand("spend", "💸 កត់ត្រាចំណាយ (Log Expense)"),
         BotCommand("income", "💰 កត់ត្រាចំណូល (Log Income)"),
         BotCommand("song", "🎧 ស្វែងរកចម្រៀង MP3 (Music Finder)"),
@@ -238,6 +246,17 @@ def main():
     app.add_handler(CommandHandler("code", code_command, block=False))
     app.add_handler(CommandHandler("run", run_code_command, block=False))
     app.add_handler(CommandHandler("debug", debug_code_command, block=False))
+
+    # Receipt, Budget Chart & Excel
+    app.add_handler(CommandHandler("chart", chart_command, block=False))
+    app.add_handler(CommandHandler("excel", excel_command, block=False))
+
+    # Web Article to Audio Podcast
+    app.add_handler(CommandHandler("listen", listen_podcast_command, block=False))
+    app.add_handler(CommandHandler("podcast", listen_podcast_command, block=False))
+
+    # Music Chords & Song Finder
+    app.add_handler(CommandHandler("chord", chord_command, block=False))
     
     # Register Callback Query Handler for Buttons
     app.add_handler(CallbackQueryHandler(button_callback_handler, block=False))

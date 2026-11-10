@@ -95,6 +95,14 @@ from services.code_runner_service import (
     format_execution_result,
     debug_and_explain_code,
 )
+from services.receipt_budget_service import (
+    scan_receipt_image,
+    record_receipt_transaction,
+    generate_budget_pie_chart,
+    generate_budget_excel,
+)
+from services.podcast_service import generate_article_podcast
+from services.chord_music_service import find_song_chords, identify_song_from_audio
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +223,10 @@ def get_main_menu_keyboard(chat_id: int) -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton("🚗 ធ្វើដំណើរ & ឡាន (/trip)", callback_data="btn_trip_menu"),
             InlineKeyboardButton("💻 Code Runner (/code)", callback_data="btn_code_menu"),
+        ],
+        [
+            InlineKeyboardButton("🎧 Web Podcast (/listen)", callback_data="btn_podcast_help"),
+            InlineKeyboardButton("🎸 Chord តន្ត្រី (/chord)", callback_data="btn_chord_help"),
         ],
         [
             InlineKeyboardButton("🛠️ ឧបករណ៍ QR / KHQR", callback_data="btn_tools_menu"),
@@ -1080,12 +1092,106 @@ async def budget_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     report = format_budget_report(update.effective_chat.id, days=30)
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔄 ធ្វើបច្ចុប្បន្នភាព", callback_data="btn_budget"),
-            InlineKeyboardButton("🗑️ សម្អាតប្រវត្តិ", callback_data="btn_clear_expenses_ask")
+            InlineKeyboardButton("📊 ក្រាហ្វិក (Pie Chart)", callback_data="btn_budget_chart"),
+            InlineKeyboardButton("📥 ទាញយក Excel (.xlsx)", callback_data="btn_budget_excel"),
         ],
-        [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+        [
+            InlineKeyboardButton("🧾 របៀបស្កេនវិក្កយបត្រ", callback_data="btn_scan_receipt_help"),
+            InlineKeyboardButton("🔄 ធ្វើបច្ចុប្បន្នភាព", callback_data="btn_budget"),
+        ],
+        [
+            InlineKeyboardButton("🗑️ សម្អាតប្រវត្តិ", callback_data="btn_clear_expenses_ask"),
+            InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+        ]
     ])
     await send_clean_response(update, context, report, reply_markup=keyboard)
+
+async def chart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate budget pie chart image: /chart."""
+    chat_id = update.effective_chat.id
+    chart_bytes = generate_budget_pie_chart(chat_id)
+    if chart_bytes:
+        import io
+        await update.message.reply_photo(
+            photo=io.BytesIO(chart_bytes),
+            caption="📊 *ក្រាហ្វិកវិភាគចំណាយតាមប្រភេទ (Donut / Pie Chart - 30 ថ្ងៃ)* ✨",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text("⚠️ មិនទាន់មានទិន្នន័យចំណាយសម្រាប់គូសក្រាហ្វិកនៅឡើយទេ។ សូមកត់ត្រាចំណាយជាមុនសិនណា៎! (ឧ. `/spend 5$ coffee`)")
+
+async def excel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate budget history Excel spreadsheet: /excel."""
+    chat_id = update.effective_chat.id
+    excel_bytes = generate_budget_excel(chat_id)
+    import io
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    await update.message.reply_document(
+        document=io.BytesIO(excel_bytes),
+        filename=f"budget_history_{today_str}.xlsx",
+        caption=f"📈 *ឯកសារប្រវត្តិចំណូល-ចំណាយ Excel (.xlsx)*\n📅 កាលបរិច្ឆេទ៖ `{today_str}`",
+        parse_mode="Markdown"
+    )
+
+async def listen_podcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Summarize web article and generate Khmer audio podcast: /listen <url> or /podcast <url>."""
+    text = update.message.text or ""
+    parts = text.split(maxsplit=1)
+    url = parts[1].strip() if len(parts) > 1 else ""
+
+    if not url or not (url.startswith("http://") or url.startswith("https://")):
+        tip = (
+            "🎧 *របៀបប្រើប្រាស់ Web Article to Audio Podcast៖*\n\n"
+            "សូមវាយ `/listen <Link វេបសាយព័ត៌មាន ឬអត្ថបទ>`\n\n"
+            "• ឧទាហរណ៍៖ `/listen https://freshnewsasia.com/...`\n\n"
+            "Bot នឹងសង្ខេប ៣ ចំណុចធំៗ និងបង្កើតជា File សំឡេង (Khmer Audio Podcast) ឱ្យលោកអ្នកស្តាប់ភ្លាមៗ! 🎙️"
+        )
+        await send_clean_response(update, context, tip, reply_markup=get_back_keyboard())
+        return
+
+    status = await update.message.reply_text("🎧 *កំពុងអានគេហទំព័រ និងផលិតសំឡេង Podcast (Khmer Audio)...* ⏳", parse_mode="Markdown")
+    podcast = await generate_article_podcast(url)
+
+    if not podcast.get("success"):
+        await safe_edit_text(status, podcast.get("bullet_summary", "❌ មិនអាចទាញយកព័ត៌មានពី Link នេះបានទេ។"))
+        return
+
+    await safe_edit_text(status, podcast["bullet_summary"], reply_markup=get_back_keyboard())
+
+    if podcast.get("audio_bytes"):
+        import io
+        clean_title = podcast.get("title", "News Podcast")[:40]
+        await update.message.reply_audio(
+            audio=io.BytesIO(podcast["audio_bytes"]),
+            title=clean_title,
+            performer="Telegram Assistant Podcast",
+            caption=f"🎙️ *ស្តាប់សេចក្តីសង្ខេបព័ត៌មាន Podcast ជាភាសាខ្មែរ* 🎧\n_ប្រភព៖ {url[:50]}_",
+            parse_mode="Markdown"
+        )
+
+async def chord_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Find guitar/piano chords, strumming pattern, and lyrics: /chord <song_name>."""
+    text = update.message.text or ""
+    parts = text.split(maxsplit=1)
+    song_name = parts[1].strip() if len(parts) > 1 else ""
+
+    if not song_name:
+        tip = (
+            "🎸 *របៀបស្វែងរកបន្ទះ Chord ហ្គីតា/ព្យាណូ & ទំនុកច្រៀង៖*\n\n"
+            "សូមវាយ៖ `/chord <ឈ្មោះបទចម្រៀង>`\n\n"
+            "• ឧទាហរណ៍៖ `/chord ចិត្តអើយ` ឬ `/chord នឹកអូន` ឬ `/chord perfect`\n\n"
+            "Bot នឹងបង្ហាញ Key, ចង្វាក់កេះហ្គីតា (Strumming), និងទំនុកច្រៀងអមជាមួយ Chord ភ្លាមៗ! 🎶"
+        )
+        await send_clean_response(update, context, tip, reply_markup=get_back_keyboard())
+        return
+
+    status = await update.message.reply_text(f"🎸 *កំពុងស្វែងរកបន្ទះ Chord & ទំនុកច្រៀងបទ '{song_name}'...* 🎶", parse_mode="Markdown")
+    chord_sheet = await find_song_chords(song_name)
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎧 ស្វែងរកចម្រៀង MP3", callback_data="btn_music_help")],
+        [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+    ])
+    await safe_edit_text(status, chord_sheet, reply_markup=kb)
 
 async def clear_expenses_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Clear all expense records for this chat: /clear_expenses."""
@@ -1725,20 +1831,41 @@ async def safe_edit_text(message, text: str, reply_markup=None, parse_mode="Mark
 # Media Handlers (Voice & Vision)
 # -------------------------------------------------------------
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle voice messages using Gemini 2.5 Flash audio understanding."""
+    """Handle voice messages using Gemini 2.5 Flash audio understanding and reply with both text & speech (Two-Way Voice Assistant)."""
     voice = update.message.voice or update.message.audio
     if not voice:
         return
         
     await update.message.chat.send_action("typing")
-    status = await update.message.reply_text("🎙️ *កំពុងស្តាប់សារសំឡេងរបស់អ្នក...* 🎧", parse_mode="Markdown")
+    status = await update.message.reply_text("🎙️ *កំពុងស្តាប់ និងវិភាគសារសំឡេងរបស់អ្នក (Two-Way Voice Assistant)...* 🎧", parse_mode="Markdown")
     
     try:
         tg_file = await context.bot.get_file(voice.file_id)
         voice_bytes = await tg_file.download_as_bytearray()
         
+        # Check if caption or audio is a song identification request
+        caption = update.message.caption or ""
+        if any(k in caption.lower() for k in ["/shazam", "/identify", "ចម្រៀង", "បទអ្វី", "song", "shazam"]):
+            shazam_res = await identify_song_from_audio(bytes(voice_bytes), mime_type="audio/ogg")
+            await safe_edit_text(status, shazam_res)
+            return
+
         reply_text = await process_voice_ai(bytes(voice_bytes), mime_type="audio/ogg")
         await safe_edit_text(status, reply_text)
+
+        # Two-Way Voice Assistant: Synthesize speech in Khmer and reply with voice audio!
+        try:
+            from services.tts_service import generate_tts_audio
+            clean_reply = re.sub(r"[*_`#~\[\]()>]", "", reply_text).strip()
+            if clean_reply and len(clean_reply) <= 600:
+                audio_fp = generate_tts_audio(clean_reply, lang="km")
+                await update.message.reply_voice(
+                    voice=audio_fp,
+                    caption="🗣️ *ឆ្លើយតបជាសំឡេង AI (Two-Way Voice)* ✨"
+                )
+        except Exception as e_voice:
+            logger.warning(f"Could not send voice reply: {e_voice}")
+
     except Exception as e:
         logger.error(f"Error handling voice message: {e}")
         await safe_edit_text(status, f"❌ មិនអាចដំណើរការសារជាសំឡេងបានទេ៖ {str(e)[:100]}")
@@ -1795,6 +1922,28 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
             ])
             await safe_edit_text(status, diag_report, reply_markup=kb)
             return
+
+        # Check if caption explicitly requests receipt/bill scanning OR mentions budget/spend keywords
+        is_receipt_request = any(k in caption_lower for k in [
+            "/receipt", "/bill", "/invoice", "វិក្កយបត្រ", "ស្លីប", "បង្កាន់ដៃ",
+            "ចំណាយ", "ទិញ", "ហាង", "spend", "bought", "aba", "bakong", "wing"
+        ])
+        if is_receipt_request:
+            status = await update.message.reply_text("🧾 *កំពុងអាន និងស្កេនវិក្កយបត្រ (AI Receipt Scanner)...* ⏳", parse_mode="Markdown")
+            parsed_receipt = await scan_receipt_image(img_bytes, caption=caption)
+            if parsed_receipt.get("is_receipt"):
+                rec_msg = record_receipt_transaction(update.effective_chat.id, parsed_receipt)
+                kb = InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("📊 របាយការណ៍ចំណាយ", callback_data="btn_budget"),
+                        InlineKeyboardButton("📈 ក្រាហ្វិក (Pie Chart)", callback_data="btn_budget_chart")
+                    ],
+                    [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+                ])
+                await safe_edit_text(status, rec_msg, reply_markup=kb)
+                return
+            else:
+                await safe_edit_text(status, "⚠️ រូបភាពនេះមិនមែនជាវិក្កយបត្រ ឬស្លីបបង់ប្រាក់ទេ។ AI នឹងវិភាគទីតាំងជូនជំនួសវិញ... 🛰️")
 
         # Check if caption explicitly requests image enhancement (HD Upscaler)
         if "/enhance" in caption_lower or "/upscale" in caption_lower or "ច្បាស់" in caption_lower:
@@ -2222,8 +2371,16 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
         "💡 *បញ្ជី Command ពេញលេញសម្រាប់ប្រើប្រាស់៖*\n\n"
         "🔹 `/start` - បើកផ្ទាំង Dashboard មេ\n"
-        "🔹 `/finance` - មើលអត្រាប្តូរប្រាក់ តម្លៃមាស និងតម្លៃសាំង\n"
+        "🔹 `/briefing` - សង្ខេបព័ត៌មាន VIP រាល់ព្រឹក\n"
+        "🔹 `/listen <url>` - បម្លែងអត្ថបទ Web ជា Audio Podcast\n"
+        "🔹 `/chord <បទ>` - រកបន្ទះ Chord ហ្គីតា/ព្យាណូ\n"
+        "🔹 `/chart` - មើលក្រាហ្វិកចំណាយ Donut/Pie Chart\n"
+        "🔹 `/excel` - ទាញយកប្រវត្តិចំណាយជា Excel (.xlsx)\n"
         "🔹 `/budget` - មើលរបាយការណ៍ចំណូល-ចំណាយ\n"
+        "🔹 `/finance` - មើលអត្រាប្តូរប្រាក់ តម្លៃមាស និងតម្លៃសាំង\n"
+        "🔹 `/trip <ខេត្ត>` - គណនាការធ្វើដំណើរ & ថ្លៃសាំង\n"
+        "🔹 `/code` - Code Runner & Debugger ក្នុង Telegram\n"
+        "🔹 `/compress` - បង្រួម & បម្លែងឯកសារ (File Master)\n"
         "🔹 `/convert 100 USD KHR` - គណនាប្តូរប្រាក់រហ័ស\n"
         "🔹 `/remind 08:30 ជួបភ្ញៀវ` - កំណត់ម៉ោងរំលឹកកិច្ចការ\n"
         "🔹 `/reminders` - មើលបញ្ជីសារដាស់តឿនរបស់អ្នក\n"
@@ -2238,6 +2395,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔹 `/watermark` - បោះត្រាការពាររូបភាពផលិតផល\n"
         "🔹 `/pdf` - Chat with PDF សង្ខេប និងឆ្លើយសំណួរ\n"
         "🔹 `/status` - ពិនិត្យស្ថានភាពគណនី\n\n"
+        "📸 *Receipt Scanner:* ថតរូបវិក្កយបត្រ ឬស្លីបបង់ប្រាក់ ➔ AI កត់ចំណាយស្វ័យប្រវត្តិ!\n"
+        "🗣️ *Voice Assistant:* ផ្ញើសារសំឡេង Voice Note ➔ Bot ឆ្លើយតបជាសំឡេងនិយាយខ្មែរ!\n"
         "📥 *Video:* Copy Link (TikTok/YouTube/FB) ផ្ញើចូលទីនេះភ្លាមៗ!"
     )
     await send_clean_response(update, context, help_text, reply_markup=get_back_keyboard(), parse_mode="Markdown")
@@ -2403,13 +2562,98 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 rep,
                 reply_markup=InlineKeyboardMarkup([
                     [
-                        InlineKeyboardButton("🔄 ធ្វើបច្ចុប្បន្នភាព", callback_data="btn_budget"),
-                        InlineKeyboardButton("🗑️ សម្អាតប្រវត្តិ", callback_data="btn_clear_expenses_ask")
+                        InlineKeyboardButton("📊 ក្រាហ្វិក (Pie Chart)", callback_data="btn_budget_chart"),
+                        InlineKeyboardButton("📥 ទាញយក Excel (.xlsx)", callback_data="btn_budget_excel"),
                     ],
-                    [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+                    [
+                        InlineKeyboardButton("🧾 របៀបស្កេនវិក្កយបត្រ", callback_data="btn_scan_receipt_help"),
+                        InlineKeyboardButton("🔄 ធ្វើបច្ចុប្បន្នភាព", callback_data="btn_budget"),
+                    ],
+                    [
+                        InlineKeyboardButton("🗑️ សម្អាតប្រវត្តិ", callback_data="btn_clear_expenses_ask"),
+                        InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+                    ]
                 ]),
                 parse_mode="Markdown"
             )
+
+        elif data == "btn_budget_chart":
+            await query.answer("📊 កំពុងបង្កើតក្រាហ្វិក Pie Chart...")
+            chart_bytes = generate_budget_pie_chart(chat_id)
+            if chart_bytes:
+                import io
+                await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=io.BytesIO(chart_bytes),
+                    caption="📊 *ក្រាហ្វិកវិភាគចំណាយតាមប្រភេទ (Donut / Pie Chart - 30 ថ្ងៃ)* ✨\n💡 _លោកអ្នកអាចចុច /excel ដើម្បីទាញយកតារាង Excel ពេញលេញ_",
+                    parse_mode="Markdown"
+                )
+            else:
+                await query.answer("⚠️ មិនទាន់មានទិន្នន័យចំណាយសម្រាប់គូសក្រាហ្វិកនៅឡើយទេ។", show_alert=True)
+
+        elif data == "btn_budget_excel":
+            await query.answer("📥 កំពុងរៀបចំឯកសារ Excel (.xlsx)...")
+            excel_bytes = generate_budget_excel(chat_id)
+            import io
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            await context.bot.send_document(
+                chat_id=chat_id,
+                document=io.BytesIO(excel_bytes),
+                filename=f"budget_history_{today_str}.xlsx",
+                caption=f"📈 *ឯកសារប្រវត្តិចំណូល-ចំណាយ Excel (.xlsx)*\n📅 កាលបរិច្ឆេទ៖ `{today_str}`\n💡 _បើកមើលលើ Excel, Google Sheets ឬ Numbers_",
+                parse_mode="Markdown"
+            )
+
+        elif data == "btn_scan_receipt_help":
+            await query.answer()
+            help_msg = (
+                "🧾 *របៀបប្រើប្រាស់ AI Receipt Scanner (ស្កេនវិក្កយបត្រស្វ័យប្រវត្តិ)៖* 📸\n\n"
+                "1. **ថតរូបវិក្កយបត្រ** ភោជនីយដ្ឋាន, ផ្សារទំនើប (AEON, Lucky, Chip Mong...) ឬស្លីបបង់ប្រាក់ ABA / Bakong / Wing\n"
+                "2. **ផ្ញើរូបភាពចូលមកក្នុង Bot នេះភ្លាមៗ**\n"
+                "   • _(អាចដាក់ Caption ថា `វិក្កយបត្រ`, `ស្លីប`, `/receipt` ឬផ្ញើតែរូបភាពក៏បាន)_\n"
+                "3. AI Vision នឹងស្កេនទាញយក៖\n"
+                "   • 🏪 ឈ្មោះហាង / ស្ថាប័ន\n"
+                "   • 💵 ចំនួនទឹកប្រាក់ ($ ឬ ៛)\n"
+                "   • 📅 កាលបរិច្ឆេទ\n"
+                "   • 🛒 មុខទំនិញលម្អិត\n"
+                "4. Bot នឹងកត់ចូលប្រព័ន្ធ `/budget` ដោយស្វ័យប្រវត្តិតែម្តង! 🚀"
+            )
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📊 ពិនិត្យមើលចំណាយ (/budget)", callback_data="btn_budget")],
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await query.edit_message_text(help_msg, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_podcast_help":
+            await query.answer()
+            tip = (
+                "🎧 *Web Article to Audio Podcast (បម្លែងអត្ថបទវេបសាយជាសំឡេង)៖* 🎙️\n\n"
+                "👉 *របៀបប្រើប្រាស់៖*\n"
+                "• វាយ `/listen <Link វេបសាយព័ត៌មាន ឬអត្ថបទ>`\n"
+                "• ឬ `/podcast <Link>`\n\n"
+                "• ឧទាហរណ៍៖\n"
+                "`/listen https://freshnewsasia.com/...`\n\n"
+                "✨ *សមត្ថភាពពិសេស៖*\n"
+                "1. ស្រង់ខ្លឹមសារអត្ថបទដោយស្វ័យប្រវត្តិពីវេបសាយ\n"
+                "2. សង្ខេប ៣ ចំណុចសំខាន់ៗជាភាសាខ្មែរផ្លូវការ\n"
+                "3. បង្កើតជា File សំឡេង (Khmer Audio Podcast .mp3) អានខ្លឹមសារនោះឱ្យលោកអ្នកស្តាប់ភ្លាមៗ! 📻"
+            )
+            await query.edit_message_text(tip, reply_markup=get_back_keyboard(), parse_mode="Markdown")
+
+        elif data == "btn_chord_help":
+            await query.answer()
+            tip = (
+                "🎸 *Guitar / Piano Chord Finder & Shazam តន្ត្រី៖* 🎵\n\n"
+                "👉 *១. រកបន្ទះ Chord ចម្រៀងខ្មែរ & អន្តរជាតិ៖*\n"
+                "• វាយ `/chord <ឈ្មោះបទ ឬអ្នកច្រៀង>`\n"
+                "• ឧទាហរណ៍៖ `/chord ចិត្តអើយ` ឬ `/chord perfect ed sheeran`\n"
+                "• បង្ហាញ Key, Tempo, Strumming Pattern, Capo និងទំនុកច្រៀងអមបន្ទះ Chord ត្រឹមត្រូវសម្រាប់លេងហ្គីតា/ព្យាណូ!\n\n"
+                "👉 *២. ស្គាល់បទភ្លេង (Shazam Song Identifier)៖*\n"
+                "• ឮគេចាក់បទភ្លេងពិរោះនៅហាងកាហ្វេ គ្រាន់តែថត **Voice Note** សំឡេងបទនោះ ៥-១០ វិនាទី ផ្ញើមក Bot\n"
+                "• ឬផ្ញើសំឡេងដោយដាក់ Caption ថា `/shazam` ឬ `ចម្រៀង`\n"
+                "• AI នឹងប្រាប់ឈ្មោះបទ ឈ្មោះអ្នកច្រៀង និងអត្ថបទចម្រៀងភ្លាមៗ! 🎶"
+            )
+            await query.edit_message_text(tip, reply_markup=get_back_keyboard(), parse_mode="Markdown")
 
         elif data == "btn_clear_expenses_ask":
             await query.answer()
