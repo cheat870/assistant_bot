@@ -781,8 +781,10 @@ async def test_telegram_user_resolver_async():
     assert "lyheak" in usernames_found
     card_heam, kb_heam = format_user_resolver_card(res_heam)
     assert "@lyheak" in card_heam
+    assert "0964280928" in card_heam
+    assert res_heam.get("photo_url") is not None
     assert len(kb_heam.inline_keyboard) >= 2
-    print(f"  - Found {len(res_heam['matches'])} similar matching profiles for 'heamlyheak' (including @lyheak): OK")
+    print(f"  - Found {len(res_heam['matches'])} similar matching profiles for 'heamlyheak' (including @lyheak, photo & phone): OK")
 
     res_socheat = await resolve_telegram_user(None, "socheat")
     assert res_socheat["valid"] is True

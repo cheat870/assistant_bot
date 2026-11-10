@@ -35,7 +35,6 @@ def extract_telegram_username(raw_text: str) -> Optional[str]:
     if m_tg:
         return m_tg.group(1)
         
-    # Remove @ prefix
     clean = raw.lstrip("@").strip()
     return clean if clean else None
 
@@ -54,7 +53,7 @@ def validate_username_format(raw_text: str) -> Tuple[bool, str, str]:
             "• ឧទាហរណ៍៖ `/user heam lyheak`\n"
             "• ឧទាហរណ៍៖ `/whois @lyheak`\n"
             "• ឧទាហរណ៍៖ `/user socheat`\n\n"
-            "Bot នឹងស្វែងរក និងបង្ហាញគណនីទាំងអស់ដែលមានឈ្មោះដូច ឬស្រដៀងគ្នា ព្រមទាំងផ្ដល់ប៊ូតុង Chat 1-Click ជូនភ្លាមៗ! 🚀"
+            "Bot នឹងស្វែងរក និងបង្ហាញគណនីទាំងអស់ ព្រមទាំងរូប Profile និងលេខទូរស័ព្ទ (Phone) ជូនភ្លាមៗ! 🚀"
         )
         
     clean = extract_telegram_username(raw_text)
@@ -66,6 +65,43 @@ def validate_username_format(raw_text: str) -> Tuple[bool, str, str]:
         )
         
     return True, clean, ""
+
+def detect_cambodia_carrier(phone_str: str) -> str:
+    """Detect Cambodian mobile telecom operator by prefix."""
+    digits = ''.join(c for c in phone_str if c.isdigit())
+    if digits.startswith("855"):
+        digits = "0" + digits[3:]
+    prefix3 = digits[:3]
+    if prefix3 in ["010", "015", "016", "069", "070", "081", "086", "087", "093", "096", "098"]:
+        return "Smart Axiata 🟢"
+    if prefix3 in ["011", "012", "014", "017", "061", "076", "077", "078", "079", "085", "089", "092", "095", "099"]:
+        return "Cellcard 🟠"
+    if prefix3 in ["031", "060", "066", "067", "068", "071", "088", "090", "097"]:
+        return "Metfone 🔴"
+    if prefix3 in ["018"]:
+        return "Seatel 🔵"
+    return "Cambodia Mobile 📱"
+
+def extract_cambodian_phones(text: str) -> List[Dict[str, str]]:
+    """Extract Cambodian phone numbers and detect telecom operator."""
+    if not text:
+        return []
+    raw_matches = re.findall(r'(?:\+?855[\s.-]?|0)[1-9][0-9\s.-]{6,11}', text)
+    results = []
+    seen = set()
+    for m in raw_matches:
+        digits = re.sub(r'\D', '', m)
+        if len(digits) in [9, 10, 11, 12]:
+            clean_digits = "0" + digits[3:] if digits.startswith("855") else digits
+            if clean_digits not in seen:
+                seen.add(clean_digits)
+                carrier = detect_cambodia_carrier(clean_digits)
+                results.append({
+                    "raw": m.strip(),
+                    "clean": clean_digits,
+                    "carrier": carrier,
+                })
+    return results
 
 def generate_smart_candidates(raw_query: str) -> List[str]:
     """Generate smart plausible Telegram username variants from query."""
@@ -124,7 +160,7 @@ def generate_smart_candidates(raw_query: str) -> List[str]:
     return final[:18]
 
 async def check_telegram_public_web(client: httpx.AsyncClient, username: str) -> Optional[Dict[str, Any]]:
-    """Check if a username actually exists publicly on Telegram's web gateway."""
+    """Check if a username actually exists publicly on Telegram's web gateway, extracting photo & phone."""
     try:
         resp = await client.get(f"https://t.me/{username}")
         if resp.status_code != 200:
@@ -136,16 +172,40 @@ async def check_telegram_public_web(client: httpx.AsyncClient, username: str) ->
         if not (has_title or has_photo):
             return None
             
-        title, extra, bio = "", "", ""
-        mt = re.search(r'class="tgme_page_title"[^>]*>(.*?)</div>', html, re.DOTALL)
+        # 1. Title / Display Name
+        title = ""
+        mt = re.search(r'class=[\'"][^\'"]*tgme_page_title[^\'"]*[\'"][^>]*>(.*?)</div>', html, re.DOTALL | re.IGNORECASE)
         if mt:
             title = re.sub(r'<[^>]+>', '', mt.group(1)).strip()
-        me = re.search(r'class="tgme_page_extra"[^>]*>(.*?)</div>', html, re.DOTALL)
+            
+        # 2. Extra / Subscribers / Members
+        extra = ""
+        me = re.search(r'class=[\'"][^\'"]*tgme_page_extra[^\'"]*[\'"][^>]*>(.*?)</div>', html, re.DOTALL | re.IGNORECASE)
         if me:
             extra = re.sub(r'<[^>]+>', '', me.group(1)).strip()
-        md = re.search(r'class="tgme_page_description"[^>]*>(.*?)</div>', html, re.DOTALL)
-        if md:
-            bio = re.sub(r'<[^>]+>', '', md.group(1)).strip()
+            
+        # 3. Bio / Description
+        bio = ""
+        mb = re.search(r'class=[\'"][^\'"]*tgme_page_description[^\'"]*[\'"][^>]*>(.*?)</div>', html, re.DOTALL | re.IGNORECASE)
+        if mb:
+            bio = re.sub(r'<[^>]+>', '', mb.group(1)).strip()
+        if not bio:
+            og_desc = re.search(r'<meta\s+property=[\'"]og:description[\'"]\s+content=[\'"]([^\'"]+)[\'"]', html, re.IGNORECASE)
+            if og_desc:
+                bio = og_desc.group(1).strip()
+
+        # 4. Profile Picture URL
+        photo_url = None
+        m_og_img = re.search(r'<meta\s+property=[\'"]og:image[\'"]\s+content=[\'"](https?://[^\'"]+)[\'"]', html, re.IGNORECASE)
+        if m_og_img and "telegram.org/img" not in m_og_img.group(1):
+            photo_url = m_og_img.group(1)
+        else:
+            m_img = re.search(r'class=[\'"][^\'"]*tgme_page_photo_image[^\'"]*[\'"][^>]*src=[\'"](https?://[^\'"]+)[\'"]', html, re.IGNORECASE)
+            if m_img and "telegram.org/img" not in m_img.group(1):
+                photo_url = m_img.group(1)
+
+        # 5. Extract Phone Numbers from Bio & Title
+        extracted_phones = extract_cambodian_phones(f"{title} {bio}")
 
         # Deduce account type
         type_km = "គណនីផ្ទាល់ខ្លួន 👤"
@@ -161,6 +221,8 @@ async def check_telegram_public_web(client: httpx.AsyncClient, username: str) ->
             "title": title or username,
             "extra": extra,
             "bio": bio,
+            "photo_url": photo_url,
+            "phones": extracted_phones,
             "type_km": type_km,
             "url_https": f"https://t.me/{username}",
             "url_tg": f"tg://resolve?domain={username}",
@@ -172,7 +234,7 @@ async def check_telegram_public_web(client: httpx.AsyncClient, username: str) ->
 async def resolve_telegram_user(bot, raw_query: str) -> Dict[str, Any]:
     """
     Search and resolve Telegram users: checks exact query, tests smart variations,
-    and returns all active matching profiles found across Telegram and local DB.
+    extracts profile photos & phone numbers across Telegram and local DB.
     """
     is_valid, clean_query, err_msg = validate_username_format(raw_query)
     if not is_valid:
@@ -181,6 +243,7 @@ async def resolve_telegram_user(bot, raw_query: str) -> Dict[str, Any]:
             "error_msg": err_msg,
             "query": raw_query,
             "matches": [],
+            "photo_url": None,
         }
 
     # Generate search candidates
@@ -205,6 +268,8 @@ async def resolve_telegram_user(bot, raw_query: str) -> Dict[str, Any]:
                 "title": f"សមាជិក ID: {db_user.get('chat_id')}",
                 "extra": "ក្នុងប្រព័ន្ធ Bot",
                 "bio": "",
+                "photo_url": None,
+                "phones": [],
                 "type_km": "គណនីក្នុងប្រព័ន្ធ Bot 💾",
                 "url_https": f"https://t.me/{u_name}",
                 "url_tg": f"tg://resolve?domain={u_name}",
@@ -233,6 +298,8 @@ async def resolve_telegram_user(bot, raw_query: str) -> Dict[str, Any]:
                 "title": display_title,
                 "extra": f"@{clean_single}",
                 "bio": bio,
+                "photo_url": None,
+                "phones": extract_cambodian_phones(f"{display_title} {bio}"),
                 "type_km": type_km,
                 "url_https": f"https://t.me/{clean_single}",
                 "url_tg": f"tg://resolve?domain={clean_single}",
@@ -243,17 +310,28 @@ async def resolve_telegram_user(bot, raw_query: str) -> Dict[str, Any]:
     matches_list = list(found_map.values())
     exact_match = found_map.get(clean_single)
 
+    # Determine top photo URL to send
+    top_photo_url = None
+    if exact_match and exact_match.get("photo_url"):
+        top_photo_url = exact_match["photo_url"]
+    elif matches_list:
+        for m in matches_list:
+            if m.get("photo_url"):
+                top_photo_url = m["photo_url"]
+                break
+
     return {
         "valid": True,
         "query": clean_query,
         "clean_single": clean_single,
         "exact_match": exact_match,
         "matches": matches_list,
+        "photo_url": top_photo_url,
     }
 
 def format_user_resolver_card(data: Dict[str, Any]) -> Tuple[str, InlineKeyboardMarkup]:
     """
-    Format report card displaying ALL matching and similar Telegram profiles found.
+    Format report card displaying profiles, phone numbers, and direct chat buttons.
     """
     if not data.get("valid"):
         return data.get("error_msg", "កំហុសមិនស្គាល់"), InlineKeyboardMarkup([
@@ -286,7 +364,7 @@ def format_user_resolver_card(data: Dict[str, Any]) -> Tuple[str, InlineKeyboard
 
     buttons = []
     lines = [
-        f"🔍 *លទ្ធផលស្វែងរកគណនី Telegram ទាំងអស់ដែលស្រដៀងនឹង \"{query}\"* ✨",
+        f"🔍 *លទ្ធផលស្វែងរកគណនី Telegram & Profile: \"{query}\"* ✨",
         "━━━━━━━━━━━━━━━━━━━━━━",
     ]
 
@@ -296,10 +374,20 @@ def format_user_resolver_card(data: Dict[str, Any]) -> Tuple[str, InlineKeyboard
         lines.append(f"• *Username:* `@{exact['username']}`")
         lines.append(f"• *ឈ្មោះបង្ហាញ (Name):* *{exact['title']}*")
         lines.append(f"• *ប្រភេទគណនី:* {exact['type_km']}")
+        
+        # Phone number
+        phones = exact.get("phones", [])
+        if phones:
+            phone_strs = [f"`{p['clean']}` ({p['carrier']})" for p in phones]
+            lines.append(f"• 📞 *លេខទូរស័ព្ទ (Phone):* {', '.join(phone_strs)}")
+        else:
+            lines.append("• 📞 *លេខទូរស័ព្ទ:* _(ម្ចាស់គណនីបានលាក់ Private)_")
+
         if exact.get("extra") and exact["extra"] != f"@{exact['username']}":
             lines.append(f"• *ព័ត៌មានបន្ថែម:* `{exact['extra']}`")
         if exact.get("bio"):
             lines.append(f"• *Bio / ពិពណ៌នា:* _{exact['bio'][:120]}_")
+            
         lines.append(f"👉 [ចុចបើក Chat (t.me/{exact['username']})]({exact['url_https']})")
         lines.append("")
 
@@ -317,10 +405,14 @@ def format_user_resolver_card(data: Dict[str, Any]) -> Tuple[str, InlineKeyboard
             t = m["title"]
             k = m["type_km"]
             b = m.get("bio", "")
+            phones = m.get("phones", [])
             lines.append(f"*{idx}.* *{t}* (`@{u}`)")
             lines.append(f"   • {k}")
+            if phones:
+                p_strs = [f"`{p['clean']}` ({p['carrier']})" for p in phones]
+                lines.append(f"   • 📞 *Phone:* {', '.join(p_strs)}")
             if b:
-                lines.append(f"   • _{b[:60]}_")
+                lines.append(f"   • 📝 _{b[:60]}_")
             lines.append(f"   👉 [បើក Chat ➔ t.me/{u}]({m['url_https']})")
             lines.append("")
 

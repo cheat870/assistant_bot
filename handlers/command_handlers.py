@@ -1199,7 +1199,7 @@ async def chord_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_edit_text(status, chord_sheet, reply_markup=kb)
 
 async def user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Resolve Telegram username and create 1-click chat links: /user <username> or /whois <username>."""
+    """Resolve Telegram username, search similar profiles, and display profile photo & phone number: /user <query>."""
     text = update.message.text or ""
     parts = text.split(maxsplit=1)
     query = parts[1].strip() if len(parts) > 1 else ""
@@ -1209,9 +1209,27 @@ async def user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_clean_response(update, context, tip, reply_markup=get_back_keyboard())
         return
 
-    status = await update.message.reply_text("🔍 *កំពុងផ្ទៀងផ្ទាត់ និងបង្កើតផ្លូវកាត់ Profile...* ⏳", parse_mode="Markdown")
+    status = await update.message.reply_text("🔍 *កំពុងស្វែងរកគណនី Telegram រូប Profile & លេខទូរស័ព្ទ...* ⏳", parse_mode="Markdown")
     profile_data = await resolve_telegram_user(context.bot, query)
     card_text, keyboard = format_user_resolver_card(profile_data)
+
+    photo_url = profile_data.get("photo_url")
+    if photo_url and len(card_text) <= 1020:
+        try:
+            await update.message.reply_photo(
+                photo=photo_url,
+                caption=card_text,
+                reply_markup=keyboard,
+                parse_mode="Markdown"
+            )
+            try:
+                await status.delete()
+            except Exception:
+                pass
+            return
+        except Exception as e_photo:
+            logger.debug(f"Failed to send profile photo, falling back to text: {e_photo}")
+
     await safe_edit_text(status, card_text, reply_markup=keyboard)
 
 async def clear_expenses_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
