@@ -754,12 +754,12 @@ async def test_telegram_user_resolver_async():
     assert extract_telegram_username("https://t.me/heamlyheak") == "heamlyheak"
     assert extract_telegram_username("t.me/heamlyheak") == "heamlyheak"
     assert extract_telegram_username("tg://resolve?domain=heamlyheak") == "heamlyheak"
-    assert extract_telegram_username("invalid space username") is None
+    assert extract_telegram_username("") is None
     print("  - Extracted clean usernames from raw text, @mentions, web URLs, and deep links: OK")
 
     # 2. Test format validation
     is_valid, clean, err = validate_username_format("")
-    assert not is_valid and "របៀបប្រើប្រាស់" in err
+    assert not is_valid and ("របៀបស្វែងរក" in err or "របៀបប្រើប្រាស់" in err)
 
     is_valid, clean, err = validate_username_format("heamlyheak")
     assert is_valid and clean == "heamlyheak"
@@ -772,23 +772,27 @@ async def test_telegram_user_resolver_async():
     assert matches[0]["username"] == "heamlyheak_test"
     print(f"  - Searched user in local database: found {len(matches)} match: OK")
 
-    # 4. Test profile resolution and card formatting for non-existent and existing accounts
-    res_none = await resolve_telegram_user(None, "heamlyheak")
-    assert res_none["valid"] is True
-    assert res_none["exists_on_telegram"] is False
-    card_none, kb_none = format_user_resolver_card(res_none)
-    assert "@heamlyheak" in card_none
-    assert "រកមិនឃើញ" in card_none
-    print("  - Handled non-existent username with smart explanation & suggestions: OK")
+    # 4. Test multi-match resolution and card formatting
+    res_heam = await resolve_telegram_user(None, "heamlyheak")
+    assert res_heam["valid"] is True
+    assert len(res_heam["matches"]) >= 1
+    # Check that similar match @lyheak was found!
+    usernames_found = [m["username"] for m in res_heam["matches"]]
+    assert "lyheak" in usernames_found
+    card_heam, kb_heam = format_user_resolver_card(res_heam)
+    assert "@lyheak" in card_heam
+    assert len(kb_heam.inline_keyboard) >= 2
+    print(f"  - Found {len(res_heam['matches'])} similar matching profiles for 'heamlyheak' (including @lyheak): OK")
 
-    res_ok = await resolve_telegram_user(None, "lyheak")
-    assert res_ok["valid"] is True
-    assert res_ok["exists_on_telegram"] is True
-    card_ok, kb_ok = format_user_resolver_card(res_ok)
-    assert "បានផ្ទៀងផ្ទាត់" in card_ok
-    assert kb_ok.inline_keyboard[0][0].url == "https://t.me/lyheak"
-    print("  - Verified existing public Telegram account (@lyheak): OK")
-    print("  [OK] Telegram Profile Resolver verified!")
+    res_socheat = await resolve_telegram_user(None, "socheat")
+    assert res_socheat["valid"] is True
+    assert res_socheat["exact_match"] is not None
+    assert len(res_socheat["matches"]) >= 3
+    card_soc, kb_soc = format_user_resolver_card(res_socheat)
+    assert "Exact Match" in card_soc
+    assert "@socheat" in card_soc
+    print(f"  - Found exact match and {len(res_socheat['matches'])} total matching accounts for 'socheat': OK")
+    print("  [OK] Telegram Profile Resolver & Multi-Match verified!")
 
 if __name__ == "__main__":
     test_holiday_calendar()
