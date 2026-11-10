@@ -1589,8 +1589,9 @@ async def song_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✨ Smart Assistant Bot 🎵"
         )
 
+        sent_msg = None
         with open(file_path, "rb") as audio_file:
-            await update.message.reply_audio(
+            sent_msg = await update.message.reply_audio(
                 audio=audio_file,
                 title=res["title"],
                 performer=res["performer"],
@@ -1602,6 +1603,29 @@ async def song_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 connect_timeout=60.0,
             )
         cleanup_file(file_path)
+
+        # Automatic Music Channel Archiving (Store song in configured Telegram channel)
+        try:
+            from services.music_archive_service import archive_song_to_channel
+            if sent_msg and sent_msg.audio:
+                archive_res = await archive_song_to_channel(
+                    bot=context.bot,
+                    user=update.effective_user,
+                    song_data={**res, "query": query},
+                    sent_audio_file_id=sent_msg.audio.file_id
+                )
+                if archive_res and archive_res.get("success") and archive_res.get("post_url"):
+                    try:
+                        await sent_msg.edit_reply_markup(
+                            reply_markup=InlineKeyboardMarkup([
+                                [InlineKeyboardButton("📻 ស្ដាប់ក្នុង Music Channel", url=archive_res["post_url"])]
+                            ])
+                        )
+                    except Exception:
+                        pass
+        except Exception as e_arch:
+            logger.warning(f"Failed to auto-archive song to channel: {e_arch}")
+
         try:
             import shutil
             shutil.rmtree(res["temp_dir"], ignore_errors=True)
@@ -1618,6 +1642,130 @@ async def song_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_edit_text(status_msg, "❌ ការ Upload ឯកសារចម្រៀងទៅ Telegram យឺតលើសម៉ោងកំណត់។ សូមសាកល្បងម្ដងទៀត។")
         else:
             await safe_edit_text(status_msg, f"❌ មិនអាចទាញយកចម្រៀងបានទេ៖ {str(e)[:150]}")
+
+async def setsongchannel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to set/link music storage channel: /setsongchannel <@channel or -100xxxxxxxxx>."""
+    user = update.effective_user
+    if not user or user.id != ADMIN_USER_ID:
+        await update.message.reply_text("⛔ *ការអនុញ្ញាតត្រូវបានបដិសេធ (Admin Only)៖* ពាក្យបញ្ជានេះសម្រាប់តែម្ចាស់ Bot ប៉ុណ្ណោះ។", parse_mode="Markdown")
+        return
+
+    arg = context.args[0].strip() if context.args else ""
+    if not arg:
+        from database import get_music_channel
+        curr = get_music_channel()
+        curr_text = f"`{curr}`" if curr else "_ពុំទាន់បានកំណត់នៅឡើយទេ_"
+        await update.message.reply_text(
+            "📻 *ការកំណត់ Channel ផ្ទុកបទចម្រៀង (Music Channel Storage)៖*\n\n"
+            f"• **Channel បច្ចុប្បន្ន៖** {curr_text}\n\n"
+            "👉 *របៀបកំណត់ Channel ថ្មី៖*\n"
+            "`/setsongchannel <@channel_username ឬ -100xxxxxxxx>`\n\n"
+            "• **ឧទាហរណ៍៖** `/setsongchannel @my_music_channel`\n"
+            "• **ឧទាហរណ៍៖** `/setsongchannel -1001234567890`\n\n"
+            "💡 *ចំណាំសំខាន់៖*\n"
+            "១. សូម Add Bot នេះចូលជា **Administrator** ក្នុង Channel របស់អ្នកជាមុនសិន\n"
+            "២. សូមបើកសិទ្ធិ (Permission) **Post Messages** ដល់ Bot\n"
+            "៣. បន្ទាប់មក រាល់ពេលដែលមានអ្នកទាញយកចម្រៀងតាម `/song` វានឹង Save ចូល Channel នោះដោយស្វ័យប្រវត្ត! 🚀",
+            parse_mode="Markdown"
+        )
+        return
+
+    from services.music_archive_service import verify_channel_access
+    from database import set_music_channel
+
+    status_msg = await update.message.reply_text(f"🔍 *កំពុងត្រួតពិនិត្យការតភ្ជាប់ទៅកាន់ Channel* `{arg}`... ⏳", parse_mode="Markdown")
+    ok, err, info = await verify_channel_access(context.bot, arg)
+
+    if not ok:
+        await safe_edit_text(
+            status_msg,
+            f"❌ *មិនអាចតភ្ជាប់ទៅកាន់ Channel `{arg}` បានទេ!* ⚠️\n\n"
+            f"• **មូលហេតុ៖** `{err}`\n\n"
+            "🧐 *សូមពិនិត្យមើលចំណុចទាំងនេះ៖*\n"
+            "១. តើអ្នកបាន Add Bot នេះចូលជា **Administrator** ក្នុង Channel រួចហើយឬនៅ?\n"
+            "២. ប្រសិនបើ Channel ជា Private សូមប្រើ **Channel ID** (ឧទាហរណ៍៖ `-100xxxxxxxxxx`) ជំនួសវិញ។",
+        )
+        return
+
+    set_music_channel(arg)
+    ch_title = info.get("title", arg) if info else arg
+    ch_id = info.get("id", arg) if info else arg
+    is_admin = info.get("is_admin", False) if info else False
+    can_post = info.get("can_post", False) if info else False
+
+    admin_badge = "✅ Administrator" if is_admin else "⚠️ Not Admin (សូម Add Bot ជា Admin)"
+    post_badge = "✅ Can Post Messages" if can_post else "⚠️ No Post Permission (សូមបើកសិទ្ធិ Post Messages)"
+
+    await safe_edit_text(
+        status_msg,
+        f"✅ *បានកំណត់ Channel ផ្ទុកបទចម្រៀងដោយជោគជ័យ!* 🎉\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📢 *ឈ្មោះ Channel:* **{ch_title}**\n"
+        f"🆔 *Channel ID / Target:* `{arg}` (`{ch_id}`)\n"
+        f"🛡️ *ស្ថានភាព Bot:* {admin_badge}\n"
+        f"✍️ *សិទ្ធិផុសសារ:* {post_badge}\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "💡 *ដំណើរការស្វ័យប្រវត្ត (Auto-Archive)៖*\n"
+        "រាល់ពេលដែលមានអ្នកទាញយកចម្រៀងតាម `/song <ឈ្មោះបទ>` Bot នឹងផ្ញើបទចម្រៀងជូនអ្នកប្រើប្រាស់ផង "
+        "និងរក្សាទុកបទចម្រៀងនោះចូលទៅក្នុង Channel នេះភ្លាមៗ (0.1s Zero-Bandwidth Instant Store)! 🎶🚀\n\n"
+        "• ចុច `/songchannel` ដើម្បីពិនិត្យស្ថិតិចម្រៀងដែលបាន Save\n"
+        "• ចុច `/clearsongchannel` ដើម្បីផ្ដាច់ការតភ្ជាប់",
+    )
+
+async def songchannel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """View current music storage channel status and archive stats: /songchannel."""
+    from database import get_music_channel, get_music_archive_stats
+    channel = get_music_channel()
+    stats = get_music_archive_stats()
+    total = stats.get("total_archived", 0)
+    recent = stats.get("recent", [])
+
+    lines = [
+        "📻 *ស្ថានភាព Music Channel Storage (ឃ្លាំងចម្រៀងស្វ័យប្រវត្ត)៖* ✨",
+        "━━━━━━━━━━━━━━━━━━━━━━",
+    ]
+
+    if channel:
+        lines.append(f"📢 *Channel កំពុងភ្ជាប់៖* `{channel}` 🟢")
+        lines.append(f"📦 *ចំនួនបទចម្រៀងដែលបាន Save ទុក៖* **{total} បទ**")
+        lines.append("")
+        if recent:
+            lines.append("🕒 *បទចម្រៀងដែលបាន Save ថ្មីៗចុងក្រោយ៖*")
+            for idx, r in enumerate(recent, 1):
+                t = r.get("title", "Unknown")
+                p = r.get("performer", "Unknown")
+                lines.append(f"  {idx}. 🎵 *{t}* - _{p}_")
+            lines.append("")
+        lines.append("💡 *បញ្ជាគ្រប់គ្រង៖*")
+        lines.append("• ប្តូរ Channel៖ `/setsongchannel <@channel>`")
+        lines.append("• ផ្ដាច់ Channel៖ `/clearsongchannel`")
+    else:
+        lines.append("⚠️ *ពុំទាន់មាន Channel ផ្ទុកបទចម្រៀងនៅឡើយទេ!*")
+        lines.append("")
+        lines.append("👉 *របៀបភ្ជាប់ Channel ដើម្បី Save ចម្រៀងស្វ័យប្រវត្ត៖*")
+        lines.append("១. បង្កើត Channel លើ Telegram ឬប្រើ Channel ដែលមានស្រាប់")
+        lines.append("២. Add Bot នេះចូលជា **Administrator** ក្នុង Channel")
+        lines.append("៣. វាយពាក្យបញ្ជា៖ `/setsongchannel @mychannel`")
+
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━")
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+async def clearsongchannel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to unlink/clear music channel storage: /clearsongchannel."""
+    user = update.effective_user
+    if not user or user.id != ADMIN_USER_ID:
+        await update.message.reply_text("⛔ *ការអនុញ្ញាតត្រូវបានបដិសេធ (Admin Only)៖* ពាក្យបញ្ជានេះសម្រាប់តែម្ចាស់ Bot ប៉ុណ្ណោះ។", parse_mode="Markdown")
+        return
+
+    from database import remove_music_channel
+    remove_music_channel()
+    await update.message.reply_text(
+        "🗑️ *បានផ្ដាច់ Channel ផ្ទុកបទចម្រៀងរួចរាល់!* 🛑\n\n"
+        "ចាប់ពីពេលនេះទៅ រាល់បទចម្រៀងដែលទាញយកតាម `/song` នឹងត្រូវផ្ញើជូនតែអ្នកប្រើប្រាស់ប៉ុណ្ណោះ "
+        "ដោយមិនមានការ Save ចូលក្នុង Channel ទៀតឡើយ។\n\n"
+        "👉 ប្រសិនបើចង់ភ្ជាប់ឡើងវិញ សូមវាយ៖ `/setsongchannel <@channel>`",
+        parse_mode="Markdown"
+    )
 
 # -------------------------------------------------------------
 # AI Background Remover Handler

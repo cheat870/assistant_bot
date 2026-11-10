@@ -94,6 +94,9 @@ from handlers.command_handlers import (
     alert_command,
     alerts_list_command,
     content_command,
+    setsongchannel_command,
+    songchannel_command,
+    clearsongchannel_command,
     button_callback_handler,
 )
 from handlers.video_handlers import handle_video_message
@@ -120,6 +123,7 @@ async def post_init(application: Application):
         BotCommand("spend", "💸 កត់ត្រាចំណាយ (Log Expense)"),
         BotCommand("income", "💰 កត់ត្រាចំណូល (Log Income)"),
         BotCommand("song", "🎧 ស្វែងរកចម្រៀង MP3 (Music Finder)"),
+        BotCommand("songchannel", "📻 ឃ្លាំងចម្រៀង Channel Storage"),
         BotCommand("pdf", "📄 Chat with PDF & សង្ខេបឯកសារ"),
         BotCommand("enhance", "🔍 ធ្វើឱ្យរូបច្បាស់ HD (Super-Res)"),
         BotCommand("watermark", "💧 ដាក់ Watermark ការពាររូបភាព"),
@@ -263,6 +267,12 @@ def main():
 
     # Music Chords & Song Finder
     app.add_handler(CommandHandler("chord", chord_command, block=False))
+    app.add_handler(CommandHandler("setsongchannel", setsongchannel_command, block=False))
+    app.add_handler(CommandHandler("setmusicchannel", setsongchannel_command, block=False))
+    app.add_handler(CommandHandler("songchannel", songchannel_command, block=False))
+    app.add_handler(CommandHandler("musicchannel", songchannel_command, block=False))
+    app.add_handler(CommandHandler("clearsongchannel", clearsongchannel_command, block=False))
+    app.add_handler(CommandHandler("delsongchannel", clearsongchannel_command, block=False))
 
     # Telegram Profile Resolver (1-Click Chat Link Generator)
     app.add_handler(CommandHandler("user", user_command, block=False))

@@ -40,6 +40,9 @@ AUTO_CLEAN_NOON_MINUTE = int(os.getenv("AUTO_CLEAN_NOON_MINUTE", "0"))
 # File size limits (Telegram bot upload limit is typically 50 MB)
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
 
+# Music Archive Storage Channel ID / Username (Optional, e.g. @my_channel or -1001234567890)
+MUSIC_CHANNEL_ID = os.getenv("MUSIC_CHANNEL_ID") or os.getenv("SONG_CHANNEL_ID") or ""
+
 # Base Directories
 BASE_DIR = Path(__file__).resolve().parent
 DOWNLOAD_DIR = BASE_DIR / "downloads"

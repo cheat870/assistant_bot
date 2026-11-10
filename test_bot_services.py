@@ -754,7 +754,62 @@ async def test_chord_music_service_async():
     assert song_res["duration"] >= 180, f"Expected full song (>3min), got {song_res['duration']}s"
     assert "weeknd" in song_res["performer"].lower() or "hills" in song_res["title"].lower()
     print(f"  - Full-length audio download verified: {song_res['title']} ({song_res['duration_str']}): OK")
-    print("  [OK] Chord Finder & Full-Length Music Downloader verified!")
+
+    # 5. Test Music Channel Archive & Storage System
+    from database import set_music_channel, get_music_channel, remove_music_channel, log_music_archive, get_music_archive_stats
+    from services.music_archive_service import archive_song_to_channel, verify_channel_access
+    from unittest.mock import AsyncMock, MagicMock
+
+    # Test settings & stats
+    assert set_music_channel("@my_test_music_hub") is True
+    assert get_music_channel() == "@my_test_music_hub"
+    log_music_archive(
+        chat_id=888,
+        query="the hills",
+        title=song_res["title"],
+        performer=song_res["performer"],
+        duration=song_res["duration"],
+        file_id="audio_file_id_test_999",
+        channel_id="@my_test_music_hub",
+        channel_message_id=101
+    )
+    music_stats = get_music_archive_stats()
+    assert music_stats["total_archived"] >= 1
+    assert any(r["title"] == song_res["title"] for r in music_stats["recent"])
+    print("  - Music channel storage database and stats logging: OK")
+
+    # Test mock bot channel archiving
+    mock_bot = MagicMock()
+    mock_bot.username = "test_smart_bot"
+    mock_msg = MagicMock()
+    mock_msg.message_id = 777
+    mock_chat = MagicMock()
+    mock_chat.username = "my_test_music_hub"
+    mock_chat.title = "Smart Music Hub"
+    mock_msg.chat = mock_chat
+    mock_bot.send_audio = AsyncMock(return_value=mock_msg)
+
+    mock_user = MagicMock()
+    mock_user.username = "cheat870"
+    mock_user.id = 888
+
+    arch_res = await archive_song_to_channel(
+        bot=mock_bot,
+        user=mock_user,
+        song_data=song_res,
+        sent_audio_file_id="audio_file_id_test_999"
+    )
+    assert arch_res is not None
+    assert arch_res["success"] is True
+    assert arch_res["message_id"] == 777
+    assert "https://t.me/my_test_music_hub/777" in arch_res["post_url"]
+    mock_bot.send_audio.assert_called_once()
+    print("  - Instant channel auto-archive delivery pipeline: OK")
+
+    # Clean up test setting
+    remove_music_channel()
+    assert get_music_channel() is None
+    print("  [OK] Chord Finder, Music Downloader & Channel Archiving verified!")
 
 def test_two_way_voice_assistant():
     print("\n[24] Testing Two-Way Voice Assistant (Khmer Speech Synthesis)...")

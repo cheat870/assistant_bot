@@ -163,6 +163,31 @@ def init_db():
             created_at TEXT
         )
     """)
+
+    # Table for Dynamic Bot Global Settings (Key-Value Store)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS bot_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+    # Table for Music Channel Archive Logs
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS music_archive (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER,
+            query TEXT,
+            title TEXT,
+            performer TEXT,
+            duration INTEGER,
+            file_id TEXT,
+            channel_id TEXT,
+            channel_message_id INTEGER,
+            archived_at TEXT
+        )
+    """)
     
     conn.commit()
     conn.close()
@@ -988,6 +1013,128 @@ def delete_crypto_alert(alert_id: int, chat_id: Optional[int] = None) -> bool:
     conn.commit()
     conn.close()
     return affected
+
+# -------------------------------------------------------------
+# Bot Settings & Music Storage Channel Management
+# -------------------------------------------------------------
+
+def get_bot_setting(key: str, default: Optional[str] = None) -> Optional[str]:
+    """Retrieve a global bot setting from SQLite."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT value FROM bot_settings WHERE key = ?", (key,))
+    row = cursor.fetchone()
+    conn.close()
+    if row and row[0]:
+        return row[0]
+    return default
+
+def set_bot_setting(key: str, value: str) -> bool:
+    """Save or update a global bot setting."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    now_str = datetime.utcnow().isoformat()
+    cursor.execute("""
+        INSERT INTO bot_settings (key, value, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    """, (key, str(value).strip(), now_str))
+    conn.commit()
+    conn.close()
+    return True
+
+def delete_bot_setting(key: str) -> bool:
+    """Delete a setting key."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM bot_settings WHERE key = ?", (key,))
+    affected = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return affected
+
+def get_music_channel() -> Optional[str]:
+    """
+    Get configured music archive channel (checks database first, then config.MUSIC_CHANNEL_ID).
+    Returns clean channel target (e.g. '@mychannel' or '-1001234567890') or None.
+    """
+    db_val = get_bot_setting("music_channel_id")
+    if db_val and db_val.strip():
+        return db_val.strip()
+
+    from config import MUSIC_CHANNEL_ID
+    if MUSIC_CHANNEL_ID and str(MUSIC_CHANNEL_ID).strip():
+        return str(MUSIC_CHANNEL_ID).strip()
+
+    return None
+
+def set_music_channel(channel_target: str) -> bool:
+    """Save music storage channel in database."""
+    target = channel_target.strip()
+    return set_bot_setting("music_channel_id", target)
+
+def remove_music_channel() -> bool:
+    """Remove music storage channel configuration."""
+    return delete_bot_setting("music_channel_id")
+
+def log_music_archive(
+    chat_id: int,
+    query: str,
+    title: str,
+    performer: str,
+    duration: int,
+    file_id: str,
+    channel_id: str,
+    channel_message_id: Optional[int] = None
+) -> bool:
+    """Log an archived song that was stored in the channel."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    now_str = datetime.utcnow().isoformat()
+    cursor.execute("""
+        INSERT INTO music_archive (
+            chat_id, query, title, performer, duration, file_id, channel_id, channel_message_id, archived_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        chat_id, query, title, performer, int(duration or 0),
+        file_id, str(channel_id), channel_message_id, now_str
+    ))
+    conn.commit()
+    conn.close()
+    return True
+
+def get_music_archive_stats() -> Dict[str, Any]:
+    """Retrieve count and recent archived songs from channel storage."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM music_archive")
+    total_count = cursor.fetchone()[0]
+
+    cursor.execute("""
+        SELECT title, performer, duration, channel_id, channel_message_id, archived_at
+        FROM music_archive
+        ORDER BY id DESC
+        LIMIT 5
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+
+    recent = [
+        {
+            "title": r[0],
+            "performer": r[1],
+            "duration": r[2],
+            "channel_id": r[3],
+            "channel_message_id": r[4],
+            "archived_at": r[5]
+        }
+        for r in rows
+    ]
+    return {
+        "total_archived": total_count,
+        "recent": recent
+    }
+
 
 
 
