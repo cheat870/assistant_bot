@@ -833,6 +833,84 @@ async def test_telegram_user_resolver_async():
     print("  - Verified Dawincyy14 profile photo bytes direct download & clean HTML unescape: OK")
     print("  [OK] Telegram Profile Resolver & Multi-Match verified!")
 
+async def test_crypto_price_watcher_and_alerts_async():
+    print("\n[26] Testing Crypto, TON & Gold Live Price Watcher & Alerts...")
+    from services.crypto_service import (
+        fetch_crypto_prices,
+        format_crypto_overview_card,
+        format_single_coin_card,
+        parse_alert_input,
+        check_and_trigger_crypto_alerts,
+        SUPPORTED_COINS
+    )
+    from database import (
+        init_db,
+        add_crypto_alert,
+        get_active_crypto_alerts,
+        get_user_crypto_alerts,
+        mark_crypto_alert_triggered,
+        delete_crypto_alert
+    )
+    init_db()
+
+    # 1. Test fetching live crypto prices
+    prices = await fetch_crypto_prices()
+    assert "BTC" in prices and "TON" in prices, "Must fetch BTC and TON prices"
+    assert prices["BTC"]["price_usd"] > 0
+    assert prices["TON"]["price_usd"] > 0
+    print(f"  - Fetched live prices: BTC=${prices['BTC']['price_usd']:,.2f}, TON=${prices['TON']['price_usd']:.3f}: OK")
+
+    # 2. Test overview card formatting
+    gold_dummy = {"damlung_usd": 3200.0, "chi_usd": 320.0}
+    card_md = format_crypto_overview_card(prices, usd_khr_rate=4085.0, gold_info=gold_dummy)
+    assert "TON" in card_md
+    assert "Bitcoin" in card_md
+    assert "៛" in card_md
+    assert "Alert" in card_md
+    print("  - Formatted Cambodian Crypto & TON Live Watcher card: OK")
+
+    # 3. Test alert input parsing
+    ok, sym, target, cond, curr_p, msg = parse_alert_input("btc 85000", prices)
+    assert ok is True
+    assert sym == "BTC"
+    assert target == 85000.0
+    assert cond in ["above", "below"]
+    print(f"  - Parsed alert input 'btc 85000' -> condition={cond}: OK")
+
+    bad_ok, _, _, _, _, bad_msg = parse_alert_input("fakecoin 999", prices)
+    assert bad_ok is False
+    assert "មិនស្គាល់កាក់" in bad_msg
+
+    # 4. Test database operations
+    test_chat = 777999
+    curr_btc = prices["BTC"]["price_usd"]
+    # Create an alert guaranteed to trigger immediately (BTC price above $1.0)
+    aid = add_crypto_alert(test_chat, "BTC", 1.0, "above", curr_btc)
+    user_alerts = get_user_crypto_alerts(test_chat)
+    assert any(a["id"] == aid for a in user_alerts)
+    print(f"  - Added crypto alert #{aid} in SQLite database: OK")
+
+    # 5. Test alert triggering mechanism with mock bot
+    class MockAlertBot:
+        def __init__(self):
+            self.sent_messages = []
+        async def send_message(self, chat_id, text, parse_mode=None):
+            self.sent_messages.append((chat_id, text))
+            return True
+
+    mock_bot = MockAlertBot()
+    triggered_count = await check_and_trigger_crypto_alerts(mock_bot)
+    assert triggered_count >= 1
+    assert any(m[0] == test_chat for m in mock_bot.sent_messages)
+    print(f"  - Verified background alert triggering and delivery to chat {test_chat}: OK")
+
+    # Clean up test alert
+    delete_crypto_alert(aid, test_chat)
+    user_alerts_after = get_user_crypto_alerts(test_chat)
+    assert not any(a["id"] == aid for a in user_alerts_after)
+    print("  - Deleted crypto alert successfully: OK")
+    print("  [OK] Crypto, TON & Gold Live Price Watcher & Alerts verified!")
+
 if __name__ == "__main__":
     test_holiday_calendar()
     test_database()
@@ -859,4 +937,5 @@ if __name__ == "__main__":
     asyncio.run(test_chord_music_service_async())
     test_two_way_voice_assistant()
     asyncio.run(test_telegram_user_resolver_async())
-    print("\n🎉 ALL 25 TEST SUITES PASSED SUCCESSFULLY! ✅")
+    asyncio.run(test_crypto_price_watcher_and_alerts_async())
+    print("\n🎉 ALL 26 TEST SUITES PASSED SUCCESSFULLY! ✅")

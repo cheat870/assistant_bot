@@ -210,6 +210,10 @@ def get_main_menu_keyboard(chat_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton("💰 សេដ្ឋកិច្ច / មាស / សាំង", callback_data="btn_finance"),
         ],
         [
+            InlineKeyboardButton("📈 ផ្សារ Crypto & TON", callback_data="btn_crypto_menu"),
+            InlineKeyboardButton("🔍 ស្វែងរក Profile (/user)", callback_data="btn_user_help"),
+        ],
+        [
             InlineKeyboardButton("👑 សង្ខេបពេលព្រឹក VIP", callback_data="btn_briefing"),
             InlineKeyboardButton("🌤️ អាកាសធាតុបច្ចុប្បន្ន", callback_data="btn_weather_now"),
         ],
@@ -247,11 +251,32 @@ def get_main_menu_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(keyboard)
 
+def get_crypto_keyboard() -> InlineKeyboardMarkup:
+    """Action keyboard for Crypto & TON Live Watcher."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("💎 TON (Telegram)", callback_data="btn_crypto_coin_TON"),
+            InlineKeyboardButton("₿ Bitcoin (BTC)", callback_data="btn_crypto_coin_BTC"),
+        ],
+        [
+            InlineKeyboardButton("🔷 Ethereum", callback_data="btn_crypto_coin_ETH"),
+            InlineKeyboardButton("🟣 Solana", callback_data="btn_crypto_coin_SOL"),
+        ],
+        [
+            InlineKeyboardButton("🔔 កំណត់ Alert", callback_data="btn_crypto_set_alert"),
+            InlineKeyboardButton("📋 Alerts របស់ខ្ញុំ", callback_data="btn_crypto_my_alerts"),
+        ],
+        [
+            InlineKeyboardButton("🔄 Refresh តម្លៃ", callback_data="btn_crypto_refresh"),
+            InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main"),
+        ]
+    ])
+
 def get_persistent_bottom_keyboard() -> ReplyKeyboardMarkup:
     """Persistent reply keyboard displayed at the bottom of the chat."""
     keyboard = [
         [KeyboardButton("📊 ចំណូល-ចំណាយ"), KeyboardButton("💰 សេដ្ឋកិច្ច/មាស/សាំង")],
-        [KeyboardButton("🌤️ អាកាសធាតុ"), KeyboardButton("📰 ព័ត៌មានពេលព្រឹក")],
+        [KeyboardButton("📈 Crypto & TON"), KeyboardButton("🌤️ អាកាសធាតុ")],
         [KeyboardButton("📍 ផ្ញើទីតាំង GPS", request_location=True), KeyboardButton("⏰ Reminders")],
         [KeyboardButton("✨ AI Chat"), KeyboardButton("🧹 សម្អាតសារ"), KeyboardButton("🏠 ផ្ទាំង Menu មេ")]
     ]
@@ -1248,6 +1273,118 @@ async def user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.warning(f"Failed to send profile photo, falling back to text: {e_photo}")
 
     await safe_edit_text(status, card_text, reply_markup=keyboard)
+
+async def crypto_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /crypto, /ton, /btc, /coin to display live market prices & alerts."""
+    from services.crypto_service import fetch_crypto_prices, format_crypto_overview_card
+    from services.finance_service import fetch_exchange_rates, fetch_gold_price
+
+    rates = await fetch_exchange_rates() or {}
+    usd_khr = rates.get("KHR", 4085.0)
+    gold = await fetch_gold_price()
+
+    crypto_data = await fetch_crypto_prices()
+    card_text = format_crypto_overview_card(crypto_data, usd_khr_rate=usd_khr, gold_info=gold)
+
+    await send_clean_response(
+        update=update,
+        context=context,
+        text=card_text,
+        reply_markup=get_crypto_keyboard(),
+        parse_mode="Markdown"
+    )
+
+async def alert_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /alert <coin> <price> to set price drop/pump notifications."""
+    from services.crypto_service import fetch_crypto_prices, parse_alert_input
+    from database import add_crypto_alert, get_user_crypto_alerts
+
+    chat_id = update.effective_chat.id
+    raw_args = " ".join(context.args) if context.args else ""
+
+    if not raw_args:
+        user_alerts = get_user_crypto_alerts(chat_id)
+        lines = [
+            "🔔 *[របៀបកំណត់ Alert តម្លៃ Crypto & TON]* 📈\n",
+            "លោកអ្នកអាចឱ្យ Bot ជួយតាមដានតម្លៃកាក់ និងផ្ញើសារប្រាប់ភ្លាមៗនៅពេលតម្លៃឡើងដល់ ឬធ្លាក់ចុះដល់គោលដៅ!\n",
+            "• វាយ៖ `/alert <ឈ្មោះកាក់> <តម្លៃ>`\n",
+            "• ឧទាហរណ៍៖ `/alert btc 85000` (ជូនដំណឹងពេល Bitcoin ឡើង/ធ្លាក់ដល់ $85,000)",
+            "• ឧទាហរណ៍៖ `/alert ton 5.5` (ជូនដំណឹងពេល TON ឡើងដល់ $5.5)",
+            "• ឧទាហរណ៍៖ `/alert eth 3200` (ជូនដំណឹងពេល Ethereum ឡើងដល់ $3,200)\n",
+            "━━━━━━━━━━━━━━━━━━━━━━"
+        ]
+        if user_alerts:
+            lines.append(f"📋 *Alerts សកម្មរបស់អ្នក ({len(user_alerts)})៖*")
+            for a in user_alerts[:6]:
+                cond_sym = "📈 ឡើងដល់" if a["condition"] == "above" else "📉 ធ្លាក់ដល់"
+                lines.append(f"• *{a['symbol']}*: {cond_sym} `${a['target_price']:,.2f}` (កាលកំណត់: `${a['created_price']:,.2f}`)")
+        else:
+            lines.append("ℹ️ _បច្ចុប្បន្នអ្នកមិនទាន់មាន Alert សកម្មណាមួយឡើយ។_")
+
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📋 Alerts របស់ខ្ញុំ", callback_data="btn_crypto_my_alerts"), InlineKeyboardButton("📈 ផ្សារ Crypto", callback_data="btn_crypto_menu")],
+            [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+        ])
+        await send_clean_response(update, context, "\n".join(lines), reply_markup=kb)
+        return
+
+    prices = await fetch_crypto_prices()
+    success, sym, target, condition, curr_p, msg = parse_alert_input(raw_args, prices)
+    if not success:
+        await send_clean_response(update, context, msg, reply_markup=get_back_keyboard())
+        return
+
+    add_crypto_alert(chat_id, sym, target, condition, curr_p)
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 Alerts របស់ខ្ញុំ", callback_data="btn_crypto_my_alerts"), InlineKeyboardButton("📈 ផ្សារ Crypto", callback_data="btn_crypto_menu")],
+        [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+    ])
+    await send_clean_response(update, context, msg, reply_markup=kb)
+
+async def alerts_list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /alerts or /myalerts to view and delete active price alerts."""
+    from database import get_user_crypto_alerts
+    chat_id = update.effective_chat.id
+    alerts = get_user_crypto_alerts(chat_id)
+
+    if not alerts:
+        msg = (
+            "📋 *បញ្ជី Price Alerts របស់អ្នក* 🔔\n\n"
+            "ℹ️ _លោកអ្នកមិនទាន់មាន Alert សកម្មណាមួយឡើយ។_\n\n"
+            "💡 *ដើម្បីបង្កើត Alert ថ្មី សូមវាយ៖*\n"
+            "`/alert <កាក់> <តម្លៃ>` (ឧទាហរណ៍: `/alert btc 85000` ឬ `/alert ton 5.5`)"
+        )
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("➕ កំណត់ Alert ថ្មី", callback_data="btn_crypto_set_alert")],
+            [InlineKeyboardButton("📈 ផ្សារ Crypto & TON", callback_data="btn_crypto_menu")],
+            [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+        ])
+        await send_clean_response(update, context, msg, reply_markup=kb)
+        return
+
+    lines = [
+        f"📋 *បញ្ជី Price Alerts សកម្មរបស់អ្នក ({len(alerts)})* 🔔\n",
+        "ចុចប៊ូតុង **[🗑️ លុប]** ខាងក្រោម ដើម្បីលុប Alert ណាមួយដែលលែងត្រូវការ៖\n",
+        "━━━━━━━━━━━━━━━━━━━━━━"
+    ]
+    buttons = []
+    for a in alerts[:10]:
+        aid = a["id"]
+        sym = a["symbol"]
+        cond = "📈 ឡើងដល់" if a["condition"] == "above" else "📉 ធ្លាក់ដល់"
+        target = a["target_price"]
+        lines.append(f"• *{sym}*: {cond} `${target:,.2f}`")
+        buttons.append([
+            InlineKeyboardButton(f"🗑️ លុប: {sym} ${target:,.2f}", callback_data=f"btn_crypto_del_alert_{aid}")
+        ])
+
+    buttons.append([
+        InlineKeyboardButton("➕ បង្កើត Alert ថ្មី", callback_data="btn_crypto_set_alert"),
+        InlineKeyboardButton("📈 ផ្សារ Crypto", callback_data="btn_crypto_menu")
+    ])
+    buttons.append([InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")])
+
+    await send_clean_response(update, context, "\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
 
 async def clear_expenses_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Clear all expense records for this chat: /clear_expenses."""
@@ -2451,6 +2588,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔹 `/watermark` - បោះត្រាការពាររូបភាពផលិតផល\n"
         "🔹 `/pdf` - Chat with PDF សង្ខេប និងឆ្លើយសំណួរ\n"
         "🔹 `/user <username>` - ស្វែងរក & បង្កើត Link ឆាតទៅកាន់ Profile\n"
+        "🔹 `/crypto` - តាមដានតម្លៃ Crypto, TON & មាស Live\n"
+        "🔹 `/alert <coin> <price>` - កំណត់ម៉ោងរោទ៍ Alert តម្លៃកាក់ (Drop/Pump)\n"
+        "🔹 `/alerts` - មើល & ចាត់ចែង Price Alerts សកម្មរបស់អ្នក\n"
         "🔹 `/status` - ពិនិត្យស្ថានភាពគណនី\n\n"
         "📸 *Receipt Scanner:* ថតរូបវិក្កយបត្រ ឬស្លីបបង់ប្រាក់ ➔ AI កត់ចំណាយស្វ័យប្រវត្តិ!\n"
         "🗣️ *Voice Assistant:* ផ្ញើសារសំឡេង Voice Note ➔ Bot ឆ្លើយតបជាសំឡេងនិយាយខ្មែរ!\n"
@@ -3390,6 +3530,95 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 await query.answer("🗑️ បានលុបសារនេះរួចរាល់")
             except Exception:
                 await query.answer()
+
+        elif data == "btn_crypto_menu":
+            await query.answer("📈 កំពុងទាញយកតម្លៃ Crypto & TON...")
+            from services.crypto_service import fetch_crypto_prices, format_crypto_overview_card
+            from services.finance_service import fetch_exchange_rates, fetch_gold_price
+            rates = await fetch_exchange_rates() or {}
+            usd_khr = rates.get("KHR", 4085.0)
+            gold = await fetch_gold_price()
+            crypto_data = await fetch_crypto_prices()
+            card_text = format_crypto_overview_card(crypto_data, usd_khr_rate=usd_khr, gold_info=gold)
+            await query.edit_message_text(
+                text=card_text,
+                reply_markup=get_crypto_keyboard(),
+                parse_mode="Markdown"
+            )
+
+        elif data == "btn_crypto_refresh":
+            await query.answer("🔄 កំពុង Update តម្លៃចុងក្រោយ...")
+            from services.crypto_service import fetch_crypto_prices, format_crypto_overview_card
+            from services.finance_service import fetch_exchange_rates, fetch_gold_price
+            rates = await fetch_exchange_rates() or {}
+            usd_khr = rates.get("KHR", 4085.0)
+            gold = await fetch_gold_price()
+            crypto_data = await fetch_crypto_prices(force_refresh=True)
+            card_text = format_crypto_overview_card(crypto_data, usd_khr_rate=usd_khr, gold_info=gold)
+            await query.edit_message_text(
+                text=card_text,
+                reply_markup=get_crypto_keyboard(),
+                parse_mode="Markdown"
+            )
+
+        elif data.startswith("btn_crypto_coin_"):
+            sym = data.replace("btn_crypto_coin_", "").upper()
+            await query.answer(f"📊 ព័ត៌មានកាក់ {sym}...")
+            from services.crypto_service import fetch_crypto_prices, format_single_coin_card
+            from services.finance_service import fetch_exchange_rates
+            rates = await fetch_exchange_rates() or {}
+            usd_khr = rates.get("KHR", 4085.0)
+            crypto_data = await fetch_crypto_prices()
+            coin = crypto_data.get(sym)
+            if coin:
+                coin_text = format_single_coin_card(coin, usd_khr_rate=usd_khr)
+                kb = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔔 កំណត់ Alert សម្រាប់កាក់នេះ", callback_data="btn_crypto_set_alert")],
+                    [InlineKeyboardButton("📈 ត្រឡប់ទៅតារាង Crypto", callback_data="btn_crypto_menu")],
+                    [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+                ])
+                await query.edit_message_text(text=coin_text, reply_markup=kb, parse_mode="Markdown")
+            else:
+                await query.answer(f"⚠️ មិនមានទិន្នន័យសម្រាប់ {sym}", show_alert=True)
+
+        elif data == "btn_crypto_my_alerts":
+            await query.answer("📋 បញ្ជី Price Alerts...")
+            await alerts_list_command(update, context)
+
+        elif data.startswith("btn_crypto_del_alert_"):
+            aid_str = data.replace("btn_crypto_del_alert_", "")
+            try:
+                aid = int(aid_str)
+                from database import delete_crypto_alert
+                delete_crypto_alert(aid, chat_id)
+                await query.answer("🗑️ បានលុប Alert នេះរួចរាល់!", show_alert=True)
+            except Exception:
+                await query.answer("❌ មិនអាចលុបបានទេ")
+            await alerts_list_command(update, context)
+
+        elif data == "btn_crypto_set_alert":
+            await query.answer()
+            tip = (
+                "🔔 *[របៀបកំណត់ Alert តម្លៃកាក់]* 📈\n\n"
+                "សូមវាយពាក្យបញ្ជាផ្ទាល់ក្នុងប្រអប់សារ៖\n"
+                "`/alert <កាក់> <តម្លៃ>`\n\n"
+                "• ឧទាហរណ៍៖ `/alert btc 85000`\n"
+                "• ឧទាហរណ៍៖ `/alert ton 5.5`\n"
+                "• ឧទាហរណ៍៖ `/alert eth 3200`\n"
+                "• ឧទាហរណ៍៖ `/alert sol 120`\n\n"
+                "Bot នឹងផ្ញើសារប្រាប់ភ្លាមៗនៅពេលទីផ្សារប្រែប្រួលដល់កម្រិតនោះ! 🚀"
+            )
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📈 ផ្សារ Crypto & TON", callback_data="btn_crypto_menu")],
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_user_help":
+            await query.answer()
+            from services.user_resolver_service import validate_username_format
+            _, _, tip = validate_username_format("")
+            await query.edit_message_text(text=tip, reply_markup=get_back_keyboard(), parse_mode="Markdown")
 
         elif data == "btn_toggle_autoclean":
             from database import is_auto_clean_enabled, set_auto_clean_enabled

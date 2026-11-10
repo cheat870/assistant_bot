@@ -134,6 +134,10 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
     elif any(k in norm_text for k in ["សេដ្ឋកិច្ច", "មាស", "សាំង", "អត្រាប្តូរប្រាក់"]) or norm_lower in ["finance", "/finance", "rate", "/rate"]:
         await finance_command(update, context)
         return
+    elif any(k in norm_text for k in ["Crypto", "crypto", "TON", "ton", "Bitcoin", "bitcoin", "BTC", "btc", "តម្លៃកាក់"]) or norm_lower in ["crypto", "/crypto", "ton", "/ton", "btc", "/btc", "coin", "/coin"]:
+        from handlers.command_handlers import crypto_command
+        await crypto_command(update, context)
+        return
     elif any(k in norm_text for k in ["រំលឹក"]) or any(k in norm_lower for k in ["reminders", "reminder"]):
         await reminders_command(update, context)
         return

@@ -149,6 +149,20 @@ def init_db():
             UNIQUE(chat_id, memory_key)
         )
     """)
+
+    # Table for Crypto & TON Price Alerts
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS crypto_price_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER NOT NULL,
+            symbol TEXT NOT NULL,
+            target_price REAL NOT NULL,
+            condition TEXT NOT NULL,
+            created_price REAL NOT NULL,
+            is_triggered INTEGER DEFAULT 0,
+            created_at TEXT
+        )
+    """)
     
     conn.commit()
     conn.close()
@@ -887,5 +901,93 @@ def find_users_in_db(query: str) -> List[Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"Error querying alert_subscribers: {e}")
         return []
+
+# -------------------------------------------------------------
+# Crypto & TON Price Alerts Database Operations
+# -------------------------------------------------------------
+def add_crypto_alert(chat_id: int, symbol: str, target_price: float, condition: str, created_price: float) -> int:
+    """Create a new crypto price threshold alert."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO crypto_price_alerts (chat_id, symbol, target_price, condition, created_price, is_triggered, created_at)
+        VALUES (?, ?, ?, ?, ?, 0, ?)
+    """, (chat_id, symbol.upper(), float(target_price), condition.lower(), float(created_price), datetime.utcnow().isoformat()))
+    alert_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return alert_id
+
+def get_active_crypto_alerts() -> List[Dict[str, Any]]:
+    """Retrieve all untriggered crypto price alerts."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, chat_id, symbol, target_price, condition, created_price, created_at
+        FROM crypto_price_alerts
+        WHERE is_triggered = 0
+        ORDER BY id ASC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {
+            "id": r[0],
+            "chat_id": r[1],
+            "symbol": r[2],
+            "target_price": r[3],
+            "condition": r[4],
+            "created_price": r[5],
+            "created_at": r[6]
+        }
+        for r in rows
+    ]
+
+def get_user_crypto_alerts(chat_id: int) -> List[Dict[str, Any]]:
+    """Retrieve all active alerts set by a specific user."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, chat_id, symbol, target_price, condition, created_price, created_at
+        FROM crypto_price_alerts
+        WHERE chat_id = ? AND is_triggered = 0
+        ORDER BY id DESC
+    """, (chat_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {
+            "id": r[0],
+            "chat_id": r[1],
+            "symbol": r[2],
+            "target_price": r[3],
+            "condition": r[4],
+            "created_price": r[5],
+            "created_at": r[6]
+        }
+        for r in rows
+    ]
+
+def mark_crypto_alert_triggered(alert_id: int):
+    """Mark a crypto price alert as triggered."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE crypto_price_alerts SET is_triggered = 1 WHERE id = ?", (alert_id,))
+    conn.commit()
+    conn.close()
+
+def delete_crypto_alert(alert_id: int, chat_id: Optional[int] = None) -> bool:
+    """Delete a crypto price alert by ID."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    if chat_id is not None:
+        cursor.execute("DELETE FROM crypto_price_alerts WHERE id = ? AND chat_id = ?", (alert_id, chat_id))
+    else:
+        cursor.execute("DELETE FROM crypto_price_alerts WHERE id = ?", (alert_id,))
+    affected = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return affected
+
 
 

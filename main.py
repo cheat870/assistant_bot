@@ -90,6 +90,9 @@ from handlers.command_handlers import (
     listen_podcast_command,
     chord_command,
     user_command,
+    crypto_command,
+    alert_command,
+    alerts_list_command,
     button_callback_handler,
 )
 from handlers.video_handlers import handle_video_message
@@ -264,6 +267,15 @@ def main():
     app.add_handler(CommandHandler("user", user_command, block=False))
     app.add_handler(CommandHandler("whois", user_command, block=False))
     app.add_handler(CommandHandler("profile", user_command, block=False))
+
+    # Crypto, TON & Gold Live Price Watcher
+    app.add_handler(CommandHandler("crypto", crypto_command, block=False))
+    app.add_handler(CommandHandler("coin", crypto_command, block=False))
+    app.add_handler(CommandHandler("ton", crypto_command, block=False))
+    app.add_handler(CommandHandler("btc", crypto_command, block=False))
+    app.add_handler(CommandHandler("alert", alert_command, block=False))
+    app.add_handler(CommandHandler("alerts", alerts_list_command, block=False))
+    app.add_handler(CommandHandler("myalerts", alerts_list_command, block=False))
     
     # Register Callback Query Handler for Buttons
     app.add_handler(CallbackQueryHandler(button_callback_handler, block=False))

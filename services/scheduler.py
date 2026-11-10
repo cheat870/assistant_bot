@@ -262,6 +262,16 @@ async def check_auto_clean_job(context):
     except Exception as e:
         logger.warning(f"Error in check_auto_clean_job: {e}")
 
+async def check_crypto_alerts_job(context):
+    """Check active crypto price alert thresholds and trigger notifications."""
+    try:
+        from services.crypto_service import check_and_trigger_crypto_alerts
+        triggered = await check_and_trigger_crypto_alerts(context.application.bot)
+        if triggered > 0:
+            logger.info(f"Triggered and delivered {triggered} crypto price alerts.")
+    except Exception as e:
+        logger.debug(f"Error in check_crypto_alerts_job: {e}")
+
 def setup_scheduler(app: Application):
     """Set up the daily 4:00 AM holiday, 5:00 AM weather alerts, 7:00 AM news, reminders, and twice-daily 3AM/12PM auto-clean."""
     job_queue = app.job_queue
@@ -319,3 +329,12 @@ def setup_scheduler(app: Application):
         name="daily_12pm_history_clean"
     )
     logger.info(f"Registered twice-daily chat auto-clean at 3:00 AM and 12:00 PM ({BOT_TIMEZONE}).")
+
+    # 6. Crypto Price Alert Checker: Check every 5 minutes (300s)
+    job_queue.run_repeating(
+        check_crypto_alerts_job,
+        interval=300,
+        first=45,
+        name="crypto_price_alerts_checker"
+    )
+    logger.info("Registered crypto price alerts checker job (every 300s).")
