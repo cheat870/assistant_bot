@@ -794,6 +794,19 @@ async def test_telegram_user_resolver_async():
     assert "Exact Match" in card_soc
     assert "@socheat" in card_soc
     print(f"  - Found exact match and {len(res_socheat['matches'])} total matching accounts for 'socheat': OK")
+
+    # 5. Test Dawincyy14 photo bytes and HTML unescaping
+    res_dawin = await resolve_telegram_user(None, "Dawincyy14")
+    assert res_dawin["valid"] is True
+    assert res_dawin["exact_match"] is not None
+    assert res_dawin.get("photo_bytes") is not None
+    assert len(res_dawin["photo_bytes"]) > 500
+    assert "Say Sievlong" in res_dawin["exact_match"]["title"]
+    assert "&#33;" not in res_dawin["exact_match"]["bio"]
+    card_dawin, kb_dawin = format_user_resolver_card(res_dawin)
+    assert len(card_dawin) <= 1000
+    assert "@dawincyy14" in card_dawin
+    print("  - Verified Dawincyy14 profile photo bytes direct download & clean HTML unescape: OK")
     print("  [OK] Telegram Profile Resolver & Multi-Match verified!")
 
 if __name__ == "__main__":

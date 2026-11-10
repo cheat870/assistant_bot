@@ -1213,11 +1213,20 @@ async def user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     profile_data = await resolve_telegram_user(context.bot, query)
     card_text, keyboard = format_user_resolver_card(profile_data)
 
+    photo_bytes = profile_data.get("photo_bytes")
     photo_url = profile_data.get("photo_url")
-    if photo_url and len(card_text) <= 1020:
+    photo_source = None
+    if photo_bytes:
+        import io
+        photo_source = io.BytesIO(photo_bytes)
+        photo_source.name = "profile.jpg"
+    elif photo_url:
+        photo_source = photo_url
+
+    if photo_source and len(card_text) <= 1024:
         try:
             await update.message.reply_photo(
-                photo=photo_url,
+                photo=photo_source,
                 caption=card_text,
                 reply_markup=keyboard,
                 parse_mode="Markdown"
@@ -1228,7 +1237,7 @@ async def user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             return
         except Exception as e_photo:
-            logger.debug(f"Failed to send profile photo, falling back to text: {e_photo}")
+            logger.warning(f"Failed to send profile photo, falling back to text: {e_photo}")
 
     await safe_edit_text(status, card_text, reply_markup=keyboard)
 
