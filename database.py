@@ -870,9 +870,9 @@ def find_users_in_db(query: str) -> List[Dict[str, Any]]:
         cursor.execute("""
             SELECT chat_id, username, chat_type, subscribed_at
             FROM alert_subscribers
-            WHERE LOWER(username) LIKE ? OR CAST(chat_id AS TEXT) = ?
+            WHERE LOWER(username) = ? OR CAST(chat_id AS TEXT) = ?
             LIMIT 10
-        """, (f"%{clean_q}%", clean_q))
+        """, (clean_q, clean_q))
         rows = cursor.fetchall()
         conn.close()
         return [

@@ -772,20 +772,22 @@ async def test_telegram_user_resolver_async():
     assert matches[0]["username"] == "heamlyheak_test"
     print(f"  - Searched user in local database: found {len(matches)} match: OK")
 
-    # 4. Test profile resolution and card formatting
-    res = await resolve_telegram_user(None, "heamlyheak")
-    assert res["valid"] is True
-    assert res["url_https"] == "https://t.me/heamlyheak"
-    assert res["url_tg"] == "tg://resolve?domain=heamlyheak"
+    # 4. Test profile resolution and card formatting for non-existent and existing accounts
+    res_none = await resolve_telegram_user(None, "heamlyheak")
+    assert res_none["valid"] is True
+    assert res_none["exists_on_telegram"] is False
+    card_none, kb_none = format_user_resolver_card(res_none)
+    assert "@heamlyheak" in card_none
+    assert "រកមិនឃើញ" in card_none
+    print("  - Handled non-existent username with smart explanation & suggestions: OK")
 
-    card_text, kb = format_user_resolver_card(res)
-    assert "@heamlyheak" in card_text
-    assert "t.me/heamlyheak" in card_text
-    assert len(kb.inline_keyboard) >= 2
-    # Verify the 1-click button URL
-    btn_url = kb.inline_keyboard[0][0].url
-    assert btn_url == "https://t.me/heamlyheak"
-    print(f"  - Profile card & 1-Click inline buttons generated: OK")
+    res_ok = await resolve_telegram_user(None, "lyheak")
+    assert res_ok["valid"] is True
+    assert res_ok["exists_on_telegram"] is True
+    card_ok, kb_ok = format_user_resolver_card(res_ok)
+    assert "បានផ្ទៀងផ្ទាត់" in card_ok
+    assert kb_ok.inline_keyboard[0][0].url == "https://t.me/lyheak"
+    print("  - Verified existing public Telegram account (@lyheak): OK")
     print("  [OK] Telegram Profile Resolver verified!")
 
 if __name__ == "__main__":
