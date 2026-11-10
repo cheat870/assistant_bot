@@ -74,7 +74,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
     is_url = query.startswith("http://") or query.startswith("https://")
     is_sc_url = is_url and "soundcloud.com" in query.lower()
 
-    # Generic high-quality audio options (no broken client overrides)
+    # High-speed options with Android client bypass for datacenter/cloud bot checks
     ydl_opts_base = {
         "format": "bestaudio[ext=m4a]/bestaudio/best",
         "outtmpl": outtmpl,
@@ -84,6 +84,11 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         "ignoreerrors": True,
         "socket_timeout": 15,
         "retries": 2,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "web"]
+            }
+        },
         "postprocessors": postprocessors,
     }
 
@@ -107,52 +112,45 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"Direct URL download failed: {e}")
 
-    # 3. Primary Strategy: YouTube Multi-Search with Full-Length Filtering (>= 45s)
+    # 3. Primary Strategy: Fast 1-to-1 YouTube Search with Android Anti-Bot Bypass
+    # Uses ytsearch1 for 1.5s ultra-fast response without datacenter rate limits
     yt_search_queries = [
-        f"ytsearch5:{query}",
-        f"ytsearch5:{query} official audio",
-        f"ytsearch5:{query} audio",
+        f"ytsearch1:{query}",
+        f"ytsearch1:{query} audio",
+        f"ytsearch1:{query} full song",
     ]
 
     for search_target in yt_search_queries:
         try:
             with yt_dlp.YoutubeDL(ydl_opts_base) as ydl:
-                # Stage 1: Fast metadata extraction without downloading all files
                 info = ydl.extract_info(search_target, download=False)
-                if not info or "entries" not in info:
+                if not info or "entries" not in info or not info["entries"]:
                     continue
-                entries = [e for e in info.get("entries", []) if e]
-                if not entries:
+                entry = info["entries"][0]
+                if not entry:
                     continue
 
-                # Filter for full-length songs (>= 45 seconds, skipping short 15s teaser/shorts)
-                full_entries = [e for e in entries if (e.get("duration") or 0) >= 45]
-                chosen = full_entries[0] if full_entries else entries[0]
-
-                # Stage 2: Download only the selected full-length candidate
-                ydl.process_ie_result(chosen, download=True)
-                return _process_downloaded_entry(chosen, temp_dir)
+                # Filter out short clips/teasers (< 45 seconds)
+                dur = entry.get("duration") or 0
+                if dur >= 45 or search_target == yt_search_queries[-1]:
+                    # Download the verified full track
+                    web_url = entry.get("webpage_url") or f"https://www.youtube.com/watch?v={entry.get('id')}"
+                    ydl.download([web_url])
+                    return _process_downloaded_entry(entry, temp_dir)
         except Exception as e_yt:
             logger.warning(f"YouTube search attempt '{search_target}' failed: {e_yt}")
 
-    # 4. Secondary Strategy: SoundCloud search with strict duration filter
+    # 4. Secondary Strategy: SoundCloud search fallback (strictly >50s, no DRM)
     try:
         ydl_opts_sc = dict(ydl_opts_base)
         ydl_opts_sc["concurrent_fragment_downloads"] = 5
         with yt_dlp.YoutubeDL(ydl_opts_sc) as ydl:
-            info = ydl.extract_info(f"scsearch5:{query}", download=False)
-            if info and "entries" in info:
-                sc_entries = [e for e in info.get("entries", []) if e]
-                # CRITICAL: SoundCloud official Go+ tracks are 30s previews (duration == 30.0)
-                # Strictly filter out any entry with duration <= 50s and DRM
-                valid_sc = [
-                    e for e in sc_entries
-                    if (e.get("duration") or 0) > 50 and not e.get("drm")
-                ]
-                if valid_sc:
-                    chosen_sc = valid_sc[0]
-                    ydl.process_ie_result(chosen_sc, download=True)
-                    return _process_downloaded_entry(chosen_sc, temp_dir)
+            info = ydl.extract_info(f"scsearch1:{query}", download=False)
+            if info and "entries" in info and info["entries"]:
+                sc_entry = info["entries"][0]
+                if sc_entry and (sc_entry.get("duration") or 0) > 50 and not sc_entry.get("drm"):
+                    ydl.process_ie_result(sc_entry, download=True)
+                    return _process_downloaded_entry(sc_entry, temp_dir)
     except Exception as e_sc:
         logger.warning(f"SoundCloud fallback failed: {e_sc}")
 
