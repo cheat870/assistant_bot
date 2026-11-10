@@ -85,9 +85,9 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
     is_url = query.startswith("http://") or query.startswith("https://")
     is_sc_url = is_url and "soundcloud.com" in query.lower()
 
-    # Robust options with multi-client bypass for datacenter/cloud bot checks
+    # Robust options with android client bypass for datacenter/cloud bot checks
     ydl_opts_base = {
-        "format": "bestaudio/best[height<=720]/best",
+        "format": "bestaudio/best",
         "outtmpl": outtmpl,
         "noplaylist": True,
         "quiet": True,
@@ -97,7 +97,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         "retries": 2,
         "extractor_args": {
             "youtube": {
-                "player_client": ["android", "ios", "mweb", "web"]
+                "player_client": ["android"]
             }
         },
         "postprocessors": postprocessors,
@@ -132,22 +132,31 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         f"ytsearch1:{query} full song",
     ]
 
+    last_error = ""
     for search_target in yt_search_queries:
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts_base) as ydl:
-                info = ydl.extract_info(search_target, download=True)
-                if not info or "entries" not in info or not info["entries"]:
-                    continue
-                entry = info["entries"][0]
-                if not entry:
-                    continue
+        for client_candidate in [["android"], ["android_vr"], None]:
+            try:
+                opts = dict(ydl_opts_base)
+                if client_candidate:
+                    opts["extractor_args"] = {"youtube": {"player_client": client_candidate}}
+                else:
+                    opts.pop("extractor_args", None)
 
-                # Filter out short clips/teasers (< 45 seconds)
-                dur = entry.get("duration") or 0
-                if dur >= 45 or search_target == yt_search_queries[-1]:
-                    return _process_downloaded_entry(entry, temp_dir)
-        except Exception as e_yt:
-            logger.warning(f"YouTube search attempt '{search_target}' failed: {e_yt}")
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(search_target, download=True)
+                    if not info or "entries" not in info or not info["entries"]:
+                        continue
+                    entry = info["entries"][0]
+                    if not entry:
+                        continue
+
+                    # Filter out short clips/teasers (< 45 seconds)
+                    dur = entry.get("duration") or 0
+                    if dur >= 45 or search_target == yt_search_queries[-1]:
+                        return _process_downloaded_entry(entry, temp_dir)
+            except Exception as e_yt:
+                last_error = str(e_yt)
+                logger.warning(f"YouTube search attempt '{search_target}' with client {client_candidate} failed: {e_yt}")
 
     # 4. Secondary Strategy: SoundCloud search fallback (strictly >50s, DRM-safe, relevant match)
     try:
@@ -187,7 +196,8 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         shutil.rmtree(temp_dir, ignore_errors=True)
     except Exception:
         pass
-    raise ValueError("រកមិនឃើញបទចម្រៀងពេញលេញដែលអ្នកចង់បានឡើយ។ សូមសាកល្បងវាយឈ្មោះបទ ឬឈ្មោះតារាចម្រៀងឱ្យកាន់តែច្បាស់។")
+    err_detail = f" (មូលហេតុបច្ចេកទេស: {last_error[:80]})" if last_error else ""
+    raise ValueError(f"រកមិនឃើញបទចម្រៀងពេញលេញដែលអ្នកចង់បានឡើយ។ សូមសាកល្បងវាយឈ្មោះបទ ឬឈ្មោះតារាចម្រៀងឱ្យកាន់តែច្បាស់។{err_detail}")
 
 def _process_downloaded_entry(entry: Dict[str, Any], temp_dir: str) -> Dict[str, Any]:
     """Helper to locate downloaded file, sanitize format for Telegram, and package clean metadata."""
