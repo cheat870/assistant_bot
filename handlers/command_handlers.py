@@ -83,6 +83,18 @@ from services.image_location_service import (
     identify_location_via_vision,
     extract_maps_url_from_vision_text,
 )
+from services.camroad_car_service import (
+    CAMBODIA_ROUTES,
+    match_destination,
+    calculate_trip_details,
+    format_trip_report,
+    diagnose_car_dashboard,
+)
+from services.code_runner_service import (
+    execute_python_code_sandboxed,
+    format_execution_result,
+    debug_and_explain_code,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +213,10 @@ def get_main_menu_keyboard(chat_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton("🔍 ធ្វើឱ្យច្បាស់ HD (/enhance)", callback_data="btn_photo_enhance_help"),
         ],
         [
+            InlineKeyboardButton("🚗 ធ្វើដំណើរ & ឡាន (/trip)", callback_data="btn_trip_menu"),
+            InlineKeyboardButton("💻 Code Runner (/code)", callback_data="btn_code_menu"),
+        ],
+        [
             InlineKeyboardButton("🛠️ ឧបករណ៍ QR / KHQR", callback_data="btn_tools_menu"),
             InlineKeyboardButton(auto_clean_text, callback_data="btn_toggle_autoclean"),
         ],
@@ -242,6 +258,42 @@ def get_briefing_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("💰 សេដ្ឋកិច្ច/មាស/សាំង", callback_data="btn_finance"),
         ],
         [InlineKeyboardButton("🔙 ត្រឡប់ទៅ Menu ដើម", callback_data="btn_back_main")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def get_trip_menu_keyboard() -> InlineKeyboardMarkup:
+    """Keyboard for CamRoad Trip Planner destinations."""
+    keyboard = [
+        [
+            InlineKeyboardButton("🏛️ សៀមរាប (អង្គរ)", callback_data="btn_trip_dest_siemreap"),
+            InlineKeyboardButton("🏖️ ព្រះសីហនុ (ល្បឿនលឿន)", callback_data="btn_trip_dest_sihanoukville"),
+        ],
+        [
+            InlineKeyboardButton("⛰️ កំពត / កែប", callback_data="btn_trip_dest_kampot"),
+            InlineKeyboardButton("🌾 បាត់ដំបង", callback_data="btn_trip_dest_battambang"),
+        ],
+        [
+            InlineKeyboardButton("🌲 មណ្ឌលគិរី", callback_data="btn_trip_dest_mondulkiri"),
+            InlineKeyboardButton("🏞️ កោះកុង", callback_data="btn_trip_dest_kohkong"),
+        ],
+        [
+            InlineKeyboardButton("🔧 វិភាគកុងទ័រឡាន (/car)", callback_data="btn_car_diag_help"),
+            InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main"),
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def get_code_menu_keyboard() -> InlineKeyboardMarkup:
+    """Keyboard for Code Runner & Debugger."""
+    keyboard = [
+        [
+            InlineKeyboardButton("▶️ Run Sample (Hello & Math)", callback_data="btn_code_sample_1"),
+            InlineKeyboardButton("▶️ Run Sample (Data & Loops)", callback_data="btn_code_sample_2"),
+        ],
+        [
+            InlineKeyboardButton("🐞 ជំនួយការកែកូដ (Debug)", callback_data="btn_code_debug_help"),
+            InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main"),
+        ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -732,6 +784,158 @@ async def compress_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• ផ្ញើរូបភាពចូលដោយផ្ទាល់ដើម្បីបង្រួមទំហំ KB/MB ដោយរក្សាភាពច្បាស់!"
     )
     await send_clean_response(update, context, msg, reply_markup=get_back_keyboard())
+
+async def trip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Plan trips in Cambodia, calculate road distance, duration, fuel cost & rest stops: /trip [destination]."""
+    text = update.message.text or ""
+    parts = text.split(maxsplit=1)
+    arg = parts[1].strip() if len(parts) > 1 else ""
+
+    if not arg:
+        msg = (
+            "🚗 *CamRoad Trip Planner (ជំនួយការធ្វើដំណើរកម្សាន្តកម្ពុជា)* 🛣️\n\n"
+            "សូមជ្រើសរើសគោលដៅទេសចរណ៍ពេញនិយមខាងក្រោម ដើម្បីគណនាចម្ងាយផ្លូវ "
+            "រយៈពេល ថ្លៃសាំងប៉ាន់ស្មាន និងកន្លែងឈប់សម្រាកល្បីៗ៖\n\n"
+            "💡 _ឬអ្នកអាចវាយឈ្មោះខេត្តផ្ទាល់៖_ `/trip <គោលដៅ>`\n"
+            "ឧទាហរណ៍៖ `/trip សៀមរាប` ឬ `/trip កំពត` ឬ `/trip ភ្នំពេញ ទៅ សៀមរាប`"
+        )
+        await send_clean_response(update, context, msg, reply_markup=get_trip_menu_keyboard())
+        return
+
+    origin = "រាជធានីភ្នំពេញ"
+    destination_str = arg
+    if "ទៅ" in arg:
+        subparts = arg.split("ទៅ", 1)
+        origin = subparts[0].replace("ពី", "").strip() or "រាជធានីភ្នំពេញ"
+        destination_str = subparts[1].strip()
+    elif "to" in arg.lower():
+        subparts = re.split(r"\bto\b", arg, flags=re.IGNORECASE)
+        origin = subparts[0].replace("from", "").strip() or "រាជធានីភ្នំពេញ"
+        destination_str = subparts[1].strip()
+
+    dest_data = match_destination(destination_str)
+    if dest_data:
+        trip = calculate_trip_details(dest_data, origin=origin)
+        report = format_trip_report(trip)
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🗺️ បើកផែនទីនាំផ្លូវ (Google Maps)", url=trip["maps_dir_url"])],
+            [
+                InlineKeyboardButton("🚗 ជ្រើសរើសគោលដៅផ្សេង", callback_data="btn_trip_menu"),
+                InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+            ]
+        ])
+        await send_clean_response(update, context, report, reply_markup=kb)
+    else:
+        dest_clean = destination_str.strip()
+        maps_url = f"https://www.google.com/maps/dir/?api=1&origin={urllib.parse.quote(origin)}&destination={urllib.parse.quote(dest_clean)}"
+        msg = (
+            f"🚗 *ផែនការធ្វើដំណើរទៅកាន់៖* *{dest_clean}*\n\n"
+            f"🚩 *ចេញដំណើរពី:* {origin}\n"
+            f"🏁 *គោលដៅ:* {dest_clean}\n\n"
+            f"🗺️ [ចុចទីនេះដើម្បីបើកមើលផ្លូវ និងចម្ងាយលើ Google Maps]({maps_url})\n\n"
+            f"💡 _សម្រាប់ខេត្តទេសចរណ៍សំខាន់ៗ (សៀមរាប, ព្រះសីហនុ, កំពត, បាត់ដំបង, មណ្ឌលគិរី, កោះកុង...) "
+            f"Bot អាចគណនាថ្លៃសាំង និងប្រាប់កន្លែងឈប់សម្រាកលម្អិតបានភ្លាមៗ!_"
+        )
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🗺️ បើកមើលលើ Google Maps", url=maps_url)],
+            [
+                InlineKeyboardButton("🚗 បញ្ជីគោលដៅពេញនិយម", callback_data="btn_trip_menu"),
+                InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+            ]
+        ])
+        await send_clean_response(update, context, msg, reply_markup=kb)
+
+async def car_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Car Diagnostic help & dashboard scanner info: /car."""
+    msg = (
+        "🔧 *Car Dashboard Diagnostic (ជំនួយការពិនិត្យកុងទ័រឡាន AI)* 🚗\n\n"
+        "រាល់ពេលដែលរថយន្តរបស់អ្នកលោតភ្លើង Warning Error នៅលើកុងទ័រ៖\n\n"
+        "📸 *របៀបប្រើប្រាស់ងាយៗ៖*\n"
+        "1. ថតរូបកុងទ័រឡានដែលមានលោតភ្លើងសញ្ញានោះ\n"
+        "2. ផ្ញើរូបភាពចូលមកក្នុង Bot នេះភ្លាមៗ (អាចដាក់ Caption `/car` ឬផ្ញើរូបធម្មតា)\n"
+        "3. AI នឹងជួយពិនិត្យ៖\n"
+        "   • ឈ្មោះសញ្ញា & កម្រិតគ្រោះថ្នាក់ (🔴 ធ្ងន់ធ្ងរ / 🟡 មធ្យម)\n"
+        "   • មូលហេតុដែលអាចកើតមានឡើង\n"
+        "   • ដំណោះស្រាយបន្ទាន់សម្រាប់អ្នកបើកបរ!\n\n"
+        "💡 _ជួយអ្នកសន្សំសំចៃពេលវេលា និងដឹងបញ្ហាមុនពេលទៅជួបជាង!_"
+    )
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚗 គណនាការធ្វើដំណើរ (/trip)", callback_data="btn_trip_menu")],
+        [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+    ])
+    await send_clean_response(update, context, msg, reply_markup=kb)
+
+async def code_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Code Runner & Debugger Hub: /code."""
+    msg = (
+        "💻 *មជ្ឈមណ្ឌល Code Runner & AI Debugger ក្នុង Telegram* ⚡\n\n"
+        "👉 *១. Run កូដ Python ផ្ទាល់ក្នុង Telegram៖*\n"
+        "• វាយ `/run <កូដ Python>`\n"
+        "• ឧទាហរណ៍៖\n"
+        "```python\n/run\nfor i in range(1, 6):\n    print('★' * i)\n```\n\n"
+        "👉 *២. ជួសជុលកូដ Error (AI Debugger)៖*\n"
+        "• វាយ `/debug <កូដដែលមាន Bug>`\n"
+        "• គាំទ្រ: Python, JS, PHP, HTML, CSS, SQL, C++, Java, Dart\n\n"
+        "💡 _អ្នកអាចចុច Run កូដគំរូខាងក្រោមដើម្បីតេស្តភ្លាមៗ៖_"
+    )
+    await send_clean_response(update, context, msg, reply_markup=get_code_menu_keyboard())
+
+async def run_code_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Run sandboxed Python code: /run <code>."""
+    text = update.message.text or ""
+    parts = text.split(maxsplit=1)
+    code = parts[1].strip() if len(parts) > 1 else ""
+
+    if not code:
+        sample_tip = (
+            "💻 *របៀបប្រើប្រាស់ Python Code Runner ⚡*\n\n"
+            "សូមវាយ `/run` អមជាមួយកូដ Python របស់អ្នក៖\n\n"
+            "ឧទាហរណ៍៖\n"
+            "```python\n/run\nx = [10, 20, 30]\nprint('ផលបូក:', sum(x))\n```\n\n"
+            "💡 _ឬចុចប៊ូតុងខាងក្រោមដើម្បី Run កូដគំរូ៖_"
+        )
+        await send_clean_response(update, context, sample_tip, reply_markup=get_code_menu_keyboard())
+        return
+
+    # Clean markdown backticks if user wrapped in ```python ... ```
+    if code.startswith("```"):
+        lines = code.split("\n")
+        if len(lines) >= 2 and lines[-1].strip().startswith("```"):
+            code = "\n".join(lines[1:-1]).strip()
+
+    status = await update.message.reply_text("⚡ *កំពុងដំណើរការកូដក្នុង Python Sandbox...* ⏳", parse_mode="Markdown")
+    res = execute_python_code_sandboxed(code)
+    report = format_execution_result(res, code)
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("💻 Code Runner Hub", callback_data="btn_code_menu")],
+        [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+    ])
+    await safe_edit_text(status, report, reply_markup=kb)
+
+async def debug_code_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Debug and fix programming code using AI: /debug <code>."""
+    text = update.message.text or ""
+    parts = text.split(maxsplit=1)
+    code = parts[1].strip() if len(parts) > 1 else ""
+
+    if not code:
+        tip = (
+            "🐞 *របៀបប្រើប្រាស់ AI Code Debugger ✨*\n\n"
+            "សូមវាយ `/debug` អមជាមួយកូដដែលមានបញ្ហា Error៖\n\n"
+            "ឧទាហរណ៍៖\n"
+            "```python\n/debug\ndef add(a, b)\n    return a + b\nprint(add(5))\n```\n\n"
+            "AI នឹងពន្យល់មូលហេតុ និងផ្ដល់កូដដែលបានកែសម្រួលត្រឹមត្រូវភ្លាមៗ!"
+        )
+        await send_clean_response(update, context, tip, reply_markup=get_back_keyboard())
+        return
+
+    status = await update.message.reply_text("🐞 *AI កំពុងពិនិត្យ និងជួសជុលកូដរបស់អ្នក...* ⏳", parse_mode="Markdown")
+    debug_report = await debug_and_explain_code(code)
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("💻 Code Runner Hub", callback_data="btn_code_menu")],
+        [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+    ])
+    await safe_edit_text(status, debug_report, reply_markup=kb)
 
 async def qr_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /qr <text/url> command."""
@@ -1579,6 +1783,17 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 await update.message.reply_location(latitude=lat, longitude=lon)
             except Exception as e_loc:
                 logger.warning(f"Could not send native location: {e_loc}")
+            return
+
+        # Check if caption explicitly requests car dashboard diagnostic
+        if any(k in caption_lower for k in ["/car", "/dashboard", "/diagnostic", "កុងទ័រ", "ឡាន", "ភ្លើងឡាន", "រថយន្ត", "check engine", "obd"]):
+            status = await update.message.reply_text("🔧 *កំពុងវិភាគភ្លើងសញ្ញាកុងទ័ររថយន្ត (Car Diagnostic AI)...* ⏳", parse_mode="Markdown")
+            diag_report = await diagnose_car_dashboard(img_bytes, caption=caption)
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🚗 គណនាការធ្វើដំណើរ (/trip)", callback_data="btn_trip_menu")],
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await safe_edit_text(status, diag_report, reply_markup=kb)
             return
 
         # Check if caption explicitly requests image enhancement (HD Upscaler)
@@ -2502,6 +2717,118 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 "💡 _អ្នកក៏អាចផ្ញើរូបភាពដើម្បីបង្រួមទំហំ KB/MB បានផងដែរ!_"
             )
             await query.edit_message_text(msg, reply_markup=get_back_keyboard(), parse_mode="Markdown")
+
+        elif data == "btn_trip_menu":
+            await query.answer()
+            msg = (
+                "🚗 *CamRoad Trip Planner & Car Hub (ជំនួយការធ្វើដំណើរ & ឡាន)* 🛣️\n\n"
+                "👉 សូមជ្រើសរើសគោលដៅធ្វើដំណើរកម្សាន្តល្បីៗនៅកម្ពុជាខាងក្រោម "
+                "ដើម្បីគណនាចម្ងាយផ្លូវ រយៈពេល ថ្លៃសាំងប៉ាន់ស្មាន និងកន្លែងឈប់សម្រាក៖\n\n"
+                "💡 _ឬអ្នកអាចវាយបញ្ជាផ្ទាល់៖_ `/trip <ឈ្មោះខេត្ត ឬគោលដៅ>`\n"
+                "ឧ. `/trip សៀមរាប` ឬ `/trip កំពត`"
+            )
+            await query.edit_message_text(msg, reply_markup=get_trip_menu_keyboard(), parse_mode="Markdown")
+
+        elif data.startswith("btn_trip_dest_"):
+            dest_key = data.replace("btn_trip_dest_", "")
+            dest_data = CAMBODIA_ROUTES.get(dest_key)
+            if dest_data:
+                await query.answer("កំពុងគណនាការធ្វើដំណើរ...")
+                trip = calculate_trip_details(dest_data, origin="រាជធានីភ្នំពេញ")
+                report = format_trip_report(trip)
+                kb = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🗺️ បើកផែនទីនាំផ្លូវ (Google Maps)", url=trip["maps_dir_url"])],
+                    [
+                        InlineKeyboardButton("🚗 ជ្រើសរើសគោលដៅផ្សេង", callback_data="btn_trip_menu"),
+                        InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+                    ]
+                ])
+                await query.edit_message_text(report, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_car_diag_help":
+            await query.answer()
+            msg = (
+                "🔧 *របៀបប្រើប្រាស់ Car Dashboard Diagnostic (វិភាគកុងទ័រឡាន)៖* 🚗\n\n"
+                "1. **ថតរូបកុងទ័រឡាន** របស់អ្នកដែលមានលោតភ្លើង Warning (Check Engine, ABS, Oil, Battery, TPMS...)\n"
+                "2. **ផ្ញើរូបភាពចូលមកក្នុង Bot នេះភ្លាមៗ**\n"
+                "   • _(អាចដាក់ Caption `/car` ឬផ្ញើរូបធម្មតាក៏បាន)_\n"
+                "3. AI នឹងវិភាគកម្រិតគ្រោះថ្នាក់ (🔴 ធ្ងន់ធ្ងរ / 🟡 មធ្យម) មូលហេតុ និងដំណោះស្រាយបន្ទាន់ជូនលោកអ្នក!\n\n"
+                "💡 _ជួយឱ្យអ្នកដឹងពីបញ្ហាឡានភ្លាមៗ មុនពេលទៅដល់ហ្គារ៉ាស!_"
+            )
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🚗 គណនាការធ្វើដំណើរ (/trip)", callback_data="btn_trip_menu")],
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await query.edit_message_text(msg, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_code_menu":
+            await query.answer()
+            msg = (
+                "💻 *មជ្ឈមណ្ឌល Code Runner & Debugger ក្នុង Telegram* ⚡\n\n"
+                "👉 *១. Run កូដ Python ផ្ទាល់ក្នុង Telegram៖*\n"
+                "• វាយ `/run <កូដ Python>`\n"
+                "• ឧទាហរណ៍៖\n"
+                "```python\n/run print('Hello from Telegram Assistant!')\n```\n\n"
+                "👉 *២. ជួសជុល និងពិនិត្យកូដ Error (AI Debugger)៖*\n"
+                "• វាយ `/debug <កូដ Error>`\n"
+                "• គាំទ្រគ្រប់ភាសា៖ Python, JS, PHP, HTML, CSS, SQL, C++, Java\n\n"
+                "💡 _អ្នកអាចចុចតេស្តកូដគំរូខាងក្រោមភ្លាមៗ៖_"
+            )
+            await query.edit_message_text(msg, reply_markup=get_code_menu_keyboard(), parse_mode="Markdown")
+
+        elif data == "btn_code_sample_1":
+            await query.answer("⚡ កំពុងដំណើរការកូដ...")
+            sample_code = (
+                "students = [('សុខា', 88), ('ដារ៉ា', 94), ('វណ្ណា', 76)]\n"
+                "for name, score in students:\n"
+                "    grade = 'A' if score >= 90 else 'B' if score >= 80 else 'C'\n"
+                "    print(f'សិស្ស: {name} | ពិន្ទុ: {score} | និទ្ទេស: {grade}')\n"
+                "avg = sum(s[1] for s in students) / len(students)\n"
+                "print(f'ពិន្ទុមធ្យមភាគរួម: {avg:.1f}')"
+            )
+            res = execute_python_code_sandboxed(sample_code)
+            report = format_execution_result(res, sample_code)
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("▶️ Run Sample 2 (Loops)", callback_data="btn_code_sample_2")],
+                [InlineKeyboardButton("🔙 ត្រឡប់ទៅ Code Hub", callback_data="btn_code_menu")]
+            ])
+            await query.edit_message_text(report, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_code_sample_2":
+            await query.answer("⚡ កំពុងដំណើរការកូដ...")
+            sample_code = (
+                "def fibonacci(n):\n"
+                "    res = [0, 1]\n"
+                "    while len(res) < n:\n"
+                "        res.append(res[-1] + res[-2])\n"
+                "    return res\n\n"
+                "fib = fibonacci(10)\n"
+                "print('Fibonacci (10 numbers):', fib)\n"
+                "evens = [x for x in fib if x % 2 == 0]\n"
+                "print('Even numbers:', evens)"
+            )
+            res = execute_python_code_sandboxed(sample_code)
+            report = format_execution_result(res, sample_code)
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("▶️ Run Sample 1 (Math)", callback_data="btn_code_sample_1")],
+                [InlineKeyboardButton("🔙 ត្រឡប់ទៅ Code Hub", callback_data="btn_code_menu")]
+            ])
+            await query.edit_message_text(report, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_code_debug_help":
+            await query.answer()
+            msg = (
+                "🐞 *របៀបប្រើប្រាស់ AI Code Debugger (ជួសជុលកូដ)៖*\n\n"
+                "👉 វាយពាក្យបញ្ជា `/debug <កូដដែលមានបញ្ហា>`\n"
+                "👉 ឧទាហរណ៍៖\n"
+                "```python\n/debug\ndef add(a, b)\n    return a + b\nprint(add(5))\n```\n\n"
+                "✨ AI នឹងប្រាប់មូលហេតុ និងផ្ដល់កូដដែលបានកែសម្រួលរួចជាស្រេចភ្លាមៗ!"
+            )
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("💻 ត្រឡប់ទៅ Code Hub", callback_data="btn_code_menu")],
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await query.edit_message_text(msg, reply_markup=kb, parse_mode="Markdown")
 
         elif data == "btn_briefing":
             await query.answer()

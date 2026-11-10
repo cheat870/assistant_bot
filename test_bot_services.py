@@ -545,6 +545,85 @@ def test_file_master_service():
     print(f"  - Image Compression & Resize: {img_stats['original_res']} -> {img_stats['new_res']} (-{img_stats['saved_pct']}%)")
     print("  [OK] Universal File Master verified!")
 
+def test_camroad_trip_planner():
+    print("\n[19] Testing CamRoad Trip Planner & Car Diagnostic...")
+    from services.camroad_car_service import (
+        CAMBODIA_ROUTES,
+        match_destination,
+        calculate_trip_details,
+        format_trip_report,
+    )
+
+    # Test destination matching
+    dest_sr = match_destination("សៀមរាប")
+    assert dest_sr is not None
+    assert dest_sr["distance_km"] == 314
+    print("  - Matched destination 'សៀមរាប': 314 km, NR6")
+
+    dest_shv = match_destination("sihanoukville")
+    assert dest_shv is not None
+    assert dest_shv["distance_km"] == 187
+    print("  - Matched destination 'sihanoukville': 187 km, Expressway E4")
+
+    # Test trip calculation & fuel cost
+    trip = calculate_trip_details(dest_sr, origin="រាជធានីភ្នំពេញ", vehicle_type="suv")
+    assert trip["fuel_needed_liters"] > 20
+    assert trip["fuel_cost_khr"] > 50000
+    assert "google.com/maps/dir" in trip["maps_dir_url"]
+    print(f"  - Calculated fuel: ~{trip['fuel_needed_liters']}L, cost: ~{trip['fuel_cost_khr']:,} KHR (~${trip['fuel_cost_usd']})")
+
+    # Test report formatting
+    report = format_trip_report(trip)
+    assert "ផ្លូវជាតិលេខ ៦" in report
+    assert "ក្រឡានកំពង់ធំ" in report
+    assert "កន្លែងឈប់សម្រាក" in report
+    print("  - Trip report formatted with highway, rest stops and local food!")
+    print("  [OK] CamRoad Trip Planner verified!")
+
+def test_code_runner_sandbox():
+    print("\n[20] Testing Python Code Runner Sandbox & Debugger...")
+    from services.code_runner_service import (
+        execute_python_code_sandboxed,
+        format_execution_result,
+    )
+
+    # 1. Test basic successful execution
+    code_ok = "a = 15\nb = 27\nprint('Total:', a + b)"
+    res_ok = execute_python_code_sandboxed(code_ok)
+    assert res_ok["success"] is True
+    assert res_ok["exit_code"] == 0
+    assert "Total: 42" in res_ok["stdout"]
+    assert res_ok["elapsed"] < 3.0
+    print(f"  - Successful execution: {res_ok['stdout']} (in {res_ok['elapsed']}s)")
+
+    # 2. Test error / traceback handling
+    code_err = "x = 10 / 0"
+    res_err = execute_python_code_sandboxed(code_err)
+    assert res_err["success"] is False
+    assert "ZeroDivisionError" in res_err["stderr"]
+    print("  - ZeroDivisionError caught and handled in stderr!")
+
+    # 3. Test security protection against dangerous patterns
+    code_unsafe = "import os\nos.system('dir')"
+    res_unsafe = execute_python_code_sandboxed(code_unsafe)
+    assert res_unsafe["success"] is False
+    assert "សុវត្ថិភាពខ្ពស់" in res_unsafe["stderr"]
+    print("  - Blocked dangerous command: 'os.system' blocked successfully!")
+
+    # 4. Test timeout handling
+    code_loop = "while True:\n    pass"
+    res_loop = execute_python_code_sandboxed(code_loop, timeout_seconds=0.6)
+    assert res_loop["success"] is False
+    assert "Timeout" in res_loop["stderr"]
+    print("  - Infinite loop timeout handled cleanly (<= 0.6s)!")
+
+    # 5. Test output formatter
+    formatted = format_execution_result(res_ok, code_ok)
+    assert "លទ្ធផលដំណើរការកូដ" in formatted
+    assert "Total: 42" in formatted
+    print("  - Formatted execution result markdown card: OK")
+    print("  [OK] Python Code Runner Sandbox verified!")
+
 if __name__ == "__main__":
     test_holiday_calendar()
     test_database()
@@ -564,4 +643,6 @@ if __name__ == "__main__":
     asyncio.run(test_enterprise_architecture())
     asyncio.run(test_briefing_service_async())
     test_file_master_service()
-    print("\n🎉 ALL 18 TEST SUITES PASSED SUCCESSFULLY! ✅")
+    test_camroad_trip_planner()
+    test_code_runner_sandbox()
+    print("\n🎉 ALL 20 TEST SUITES PASSED SUCCESSFULLY! ✅")

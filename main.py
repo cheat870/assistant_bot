@@ -79,6 +79,11 @@ from handlers.command_handlers import (
     search_command,
     briefing_command,
     compress_command,
+    trip_command,
+    car_command,
+    code_command,
+    run_code_command,
+    debug_code_command,
     button_callback_handler,
 )
 from handlers.video_handlers import handle_video_message
@@ -222,6 +227,16 @@ def main():
     app.add_handler(CommandHandler("search", search_command, block=False))
     app.add_handler(CommandHandler("briefing", briefing_command, block=False))
     app.add_handler(CommandHandler("compress", compress_command, block=False))
+    
+    # CamRoad Trip Planner & Car Diagnostic
+    app.add_handler(CommandHandler("trip", trip_command, block=False))
+    app.add_handler(CommandHandler("travel", trip_command, block=False))
+    app.add_handler(CommandHandler("car", car_command, block=False))
+
+    # Code Runner Sandbox & AI Debugger
+    app.add_handler(CommandHandler("code", code_command, block=False))
+    app.add_handler(CommandHandler("run", run_code_command, block=False))
+    app.add_handler(CommandHandler("debug", debug_code_command, block=False))
     
     # Register Callback Query Handler for Buttons
     app.add_handler(CallbackQueryHandler(button_callback_handler, block=False))
