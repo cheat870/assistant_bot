@@ -747,7 +747,14 @@ async def test_chord_music_service_async():
     shazam_offline = await identify_song_from_audio(b"dummy_audio_bytes", mime_type="audio/ogg")
     assert len(shazam_offline) > 10
     print("  - Shazam audio identifier pipeline verified: OK")
-    print("  [OK] Chord Finder & Shazam verified!")
+
+    # 4. Test Full-Length Audio Downloader (No 30s snippets, correct artist match)
+    from services.music_service import download_song
+    song_res = await download_song("the hills")
+    assert song_res["duration"] >= 180, f"Expected full song (>3min), got {song_res['duration']}s"
+    assert "weeknd" in song_res["performer"].lower() or "hills" in song_res["title"].lower()
+    print(f"  - Full-length audio download verified: {song_res['title']} ({song_res['duration_str']}): OK")
+    print("  [OK] Chord Finder & Full-Length Music Downloader verified!")
 
 def test_two_way_voice_assistant():
     print("\n[24] Testing Two-Way Voice Assistant (Khmer Speech Synthesis)...")
