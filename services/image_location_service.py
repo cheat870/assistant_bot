@@ -150,3 +150,43 @@ async def identify_location_via_vision(image_bytes: bytes, caption: str = "") ->
     except Exception as e:
         logger.error(f"Vision location identification failed: {e}")
         return format_gemini_error(e)
+
+def extract_maps_url_from_vision_text(text: str) -> Optional[str]:
+    """Extract a Google Maps coordinate or search URL from Vision AI analysis text."""
+    if not text:
+        return None
+        
+    import re
+    import urllib.parse
+    
+    # 1. Look for lat, lon coordinates (e.g., 11.5564, 104.9282)
+    coords_match = re.search(r"(\d{1,2}\.\d{3,8})[,\s]+(\d{2,3}\.\d{3,8})", text)
+    if coords_match:
+        lat, lon = coords_match.group(1), coords_match.group(2)
+        try:
+            f_lat, f_lon = float(lat), float(lon)
+            if -90 <= f_lat <= 90 and -180 <= f_lon <= 180:
+                return f"https://www.google.com/maps?q={f_lat},{f_lon}"
+        except Exception:
+            pass
+
+    # 2. Look for identified landmark or building line
+    landmark_match = re.search(r"ឈ្មោះទីតាំង(?:/សំណង់)?[\s:៖]+([^\n]+)", text)
+    if landmark_match:
+        landmark = landmark_match.group(1).strip()
+        landmark = re.sub(r"[\*\(\)\[\]]", "", landmark).strip()
+        invalid_words = ["មិនច្បាស់", "មិនអាចកំណត់", "មិនស្គាល់", "unknown", "n/a", "none"]
+        if landmark and not any(w in landmark.lower() for w in invalid_words):
+            return f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(landmark)}"
+
+    # 3. Look for district/province line if specific
+    province_match = re.search(r"ខេត្ត/រាជធានី[\s:៖]+([^\n]+)", text)
+    if province_match:
+        prov = province_match.group(1).strip()
+        prov = re.sub(r"[\*\(\)\[\]]", "", prov).strip()
+        invalid_words = ["មិនច្បាស់", "មិនអាចកំណត់", "មិនស្គាល់", "unknown", "n/a"]
+        if prov and not any(w in prov.lower() for w in invalid_words):
+            return f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(prov)}"
+
+    return None
+

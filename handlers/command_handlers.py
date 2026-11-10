@@ -81,6 +81,7 @@ from services.image_location_service import (
     extract_gps_from_image_bytes,
     format_photo_gps_message,
     identify_location_via_vision,
+    extract_maps_url_from_vision_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -1539,7 +1540,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         await safe_edit_text(status, f"❌ មិនអាចដំណើរការសារជាសំឡេងបានទេ៖ {str(e)[:100]}")
 
 async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle photo messages for QR reading or Vision OCR."""
+    """Handle photo messages: automatically extract location directly from image (EXIF GPS or AI Geolocation), or handle QR / Vision."""
     photos = update.message.photo
     if not photos:
         return
@@ -1547,6 +1548,7 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
     # Get highest resolution
     photo = photos[-1]
     caption = update.message.caption or ""
+    caption_lower = caption.lower()
     
     await update.message.chat.send_action("typing")
     
@@ -1554,10 +1556,8 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
         tg_file = await context.bot.get_file(photo.file_id)
         img_bytes = bytes(await tg_file.download_as_bytearray())
         
-        # 1. Check for EXIF GPS metadata in photo
+        # 1. First priority: Check for hardware EXIF GPS metadata in photo
         gps_coords = extract_gps_from_image_bytes(img_bytes)
-        caption_lower = caption.lower()
-        is_loc_request = any(k in caption_lower for k in ["/loc", "/location", "ទីតាំង", "កន្លែង", "ផែនទី", "gps", "where", "location"])
 
         if gps_coords:
             lat, lon = gps_coords
@@ -1581,21 +1581,7 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 logger.warning(f"Could not send native location: {e_loc}")
             return
 
-        if is_loc_request:
-            # User specifically requested location identification
-            status = await update.message.reply_text("🔍 *កំពុងពិនិត្យមើលស្លាកសញ្ញា សំណង់ និងទីតាំងក្នុងរូបភាព (AI Geolocation)...* 🛰️", parse_mode="Markdown")
-            vision_loc = await identify_location_via_vision(img_bytes, caption=caption)
-            loc_action_kb = InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("🧹 សម្អាតសារ", callback_data="btn_clean_chat"),
-                    InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
-                ]
-            ])
-            await safe_edit_text(status, vision_loc, reply_markup=loc_action_kb)
-            return
-
-        # Check if caption requests image enhancement (HD Upscaler)
-        caption_lower = caption.lower()
+        # Check if caption explicitly requests image enhancement (HD Upscaler)
         if "/enhance" in caption_lower or "/upscale" in caption_lower or "ច្បាស់" in caption_lower:
             status = await update.message.reply_text("🔍 *កំពុងសម្អាត Noise និងបង្កើនគុណភាពរូបភាព HD...* ⏳", parse_mode="Markdown")
             import io
@@ -1613,7 +1599,7 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 pass
             return
 
-        # Check if caption requests watermark
+        # Check if caption explicitly requests watermark
         if "/watermark" in caption_lower or "watermark" in caption_lower or "បោះត្រា" in caption_lower:
             status = await update.message.reply_text("💧 *កំពុងបោះត្រា Watermark លើរូបភាព...* ⏳", parse_mode="Markdown")
             import io
@@ -1632,7 +1618,7 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 pass
             return
 
-        # Check if caption requests background removal
+        # Check if caption explicitly requests background removal
         if "/rembg" in caption_lower or "កាត់" in caption_lower or "background" in caption_lower:
             status = await update.message.reply_text("✂️ *កំពុងកាត់ផ្ទៃខាងក្រោយរូបភាព (Background Remover)...*", parse_mode="Markdown")
             await update.message.chat.send_action("upload_document")
@@ -1649,9 +1635,9 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 pass
             return
 
-        # 1. First check if it's a QR code / KHQR
+        # Check if it's a QR code / KHQR payment receipt
         qr_text = read_qr_code(img_bytes)
-        if qr_text and not caption:
+        if qr_text and (not caption or any(k in caption_lower for k in ["qr", "khqr", "ស្កេន", "scan"])):
             is_url = qr_text.startswith("http://") or qr_text.startswith("https://")
             buttons = []
             if is_url:
@@ -1669,24 +1655,55 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 reply_markup=InlineKeyboardMarkup(buttons)
             )
             return
-            
-        # 2. Otherwise process with Gemini Vision OCR / AI
-        status = await update.message.reply_text("📷 *AI កំពុងអាន និងវិភាគរូបភាពរបស់អ្នក...* 🔍", parse_mode="Markdown")
-        reply_text = await process_vision_ai(img_bytes, mime_type="image/jpeg", caption=caption)
-        photo_action_kb = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("📍 ស្វែងរកទីតាំង (GPS)", callback_data="btn_photo_loc_help"),
-                InlineKeyboardButton("🔍 ធ្វើឱ្យច្បាស់ HD", callback_data="btn_photo_enhance_help"),
-            ],
-            [
-                InlineKeyboardButton("💧 ដាក់ Watermark", callback_data="btn_photo_watermark_help"),
-                InlineKeyboardButton("✂️ កាត់ Background", callback_data="btn_photo_rembg_help"),
-            ],
-            [
-                InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main"),
-            ]
+
+        # Check if caption explicitly requests OCR / homework solving / text translation
+        is_ocr_request = any(k in caption_lower for k in [
+            "បកប្រែ", "translate", "អានអក្សរ", "ដោះស្រាយ", "លំហាត់", "សង្ខេប", "ocr", "អានឯកសារ"
         ])
-        await safe_edit_text(status, reply_text, reply_markup=photo_action_kb)
+        if is_ocr_request:
+            status = await update.message.reply_text("📷 *AI កំពុងអាន និងដោះស្រាយរូបភាពរបស់អ្នក...* 🔍", parse_mode="Markdown")
+            reply_text = await process_vision_ai(img_bytes, mime_type="image/jpeg", caption=caption)
+            photo_action_kb = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("📍 ស្វែងរកទីតាំង (GPS)", callback_data="btn_photo_loc_help"),
+                    InlineKeyboardButton("🔍 ធ្វើឱ្យច្បាស់ HD", callback_data="btn_photo_enhance_help"),
+                ],
+                [
+                    InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main"),
+                ]
+            ])
+            await safe_edit_text(status, reply_text, reply_markup=photo_action_kb)
+            return
+
+        # 2. DEFAULT BEHAVIOR: Automatically extract location directly from the image!
+        # "ចង់ឲពេលsend image ឲវាទាញយកlocation ពីក្នុង image តែម្តង"
+        status = await update.message.reply_text("📍 *កំពុងទាញយក និងវិភាគទីតាំងពីរូបភាព (AI Geolocation)...* 🛰️", parse_mode="Markdown")
+        vision_loc = await identify_location_via_vision(img_bytes, caption=caption)
+        
+        maps_url = extract_maps_url_from_vision_text(vision_loc)
+        buttons = []
+        if maps_url:
+            buttons.append([InlineKeyboardButton("🗺️ បើកមើលលើ Google Maps", url=maps_url)])
+        buttons.append([
+            InlineKeyboardButton("🔍 ធ្វើឱ្យច្បាស់ HD", callback_data="btn_photo_enhance_help"),
+            InlineKeyboardButton("🧹 សម្អាតសារ", callback_data="btn_clean_chat")
+        ])
+        buttons.append([
+            InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+        ])
+        
+        await safe_edit_text(status, vision_loc, reply_markup=InlineKeyboardMarkup(buttons))
+
+        # If estimated coordinates in Cambodia were found, send native Telegram map pin
+        import re
+        coords_match = re.search(r"(\d{1,2}\.\d{3,8})[,\s]+(\d{2,3}\.\d{3,8})", vision_loc)
+        if coords_match:
+            try:
+                plat, plon = float(coords_match.group(1)), float(coords_match.group(2))
+                if 9.0 <= plat <= 15.5 and 102.0 <= plon <= 108.0:
+                    await update.message.reply_location(latitude=plat, longitude=plon)
+            except Exception as e_loc:
+                logger.debug(f"Could not reply estimated location pin: {e_loc}")
         
     except Exception as e:
         logger.error(f"Error handling photo: {e}")
@@ -1712,8 +1729,9 @@ async def handle_document_image(update: Update, context: ContextTypes.DEFAULT_TY
         tg_file = await context.bot.get_file(doc.file_id)
         img_bytes = bytes(await tg_file.download_as_bytearray())
         caption = update.message.caption or ""
+        caption_lower = caption.lower()
 
-        # Check for EXIF GPS
+        # 1. Check for hardware EXIF GPS
         gps_coords = extract_gps_from_image_bytes(img_bytes)
         if gps_coords:
             lat, lon = gps_coords
@@ -1737,19 +1755,66 @@ async def handle_document_image(update: Update, context: ContextTypes.DEFAULT_TY
                 logger.warning(f"Could not send native location: {e_loc}")
             return
 
-        # If no GPS, but caption requests location
-        caption_lower = caption.lower()
-        if any(k in caption_lower for k in ["/loc", "/location", "ទីតាំង", "កន្លែង", "ផែនទី", "gps", "where", "location"]):
-            status = await update.message.reply_text("🔍 *កំពុងវិភាគទីតាំងក្នុងរូបភាព (AI Geolocation)...* 🛰️", parse_mode="Markdown")
-            vision_loc = await identify_location_via_vision(img_bytes, caption=caption)
-            loc_action_kb = InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("🧹 សម្អាតសារ", callback_data="btn_clean_chat"),
-                    InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
-                ]
-            ])
-            await safe_edit_text(status, vision_loc, reply_markup=loc_action_kb)
+        # 2. Check explicit commands on document image
+        if "/enhance" in caption_lower or "/upscale" in caption_lower or "ច្បាស់" in caption_lower:
+            status = await update.message.reply_text("🔍 *កំពុងបង្កើនគុណភាពរូបភាព HD...* ⏳", parse_mode="Markdown")
+            import io
+            enhanced_bytes, metrics = enhance_image(img_bytes)
+            caption_out = (
+                f"✨ *រូបភាពរបស់អ្នកត្រូវបានបង្កើនគុណភាព HD រួចរាល់!* 🔍\n\n"
+                f"📐 *ទំហំដើម:* `{metrics['orig_width']} x {metrics['orig_height']}` px\n"
+                f"📈 *ទំហំថ្មី (HD):* `{metrics['new_width']} x {metrics['new_height']}` px (+{metrics['scale']}x)"
+            )
+            await update.message.reply_photo(photo=io.BytesIO(enhanced_bytes), caption=caption_out, parse_mode="Markdown")
+            try:
+                await status.delete()
+            except Exception:
+                pass
             return
+
+        if "/rembg" in caption_lower or "កាត់" in caption_lower or "background" in caption_lower:
+            status = await update.message.reply_text("✂️ *កំពុងកាត់ផ្ទៃខាងក្រោយ...*", parse_mode="Markdown")
+            png_fp = await remove_background(img_bytes)
+            png_fp.name = "cutout.png"
+            await update.message.reply_document(document=png_fp, caption="✂️ *កាត់ផ្ទៃខាងក្រោយជោគជ័យ!*", parse_mode="Markdown")
+            try:
+                await status.delete()
+            except Exception:
+                pass
+            return
+
+        is_ocr_request = any(k in caption_lower for k in [
+            "បកប្រែ", "translate", "អានអក្សរ", "ដោះស្រាយ", "លំហាត់", "សង្ខេប", "ocr"
+        ])
+        if is_ocr_request:
+            status = await update.message.reply_text("📷 *AI កំពុងអានឯកសាររូបភាពរបស់អ្នក...* 🔍", parse_mode="Markdown")
+            reply_text = await process_vision_ai(img_bytes, mime_type="image/jpeg", caption=caption)
+            await safe_edit_text(status, reply_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]]))
+            return
+
+        # 3. DEFAULT: Automatically extract location from document image!
+        status = await update.message.reply_text("📍 *កំពុងទាញយក និងវិភាគទីតាំងពីរូបភាព File (AI Geolocation)...* 🛰️", parse_mode="Markdown")
+        vision_loc = await identify_location_via_vision(img_bytes, caption=caption)
+        maps_url = extract_maps_url_from_vision_text(vision_loc)
+        buttons = []
+        if maps_url:
+            buttons.append([InlineKeyboardButton("🗺️ បើកមើលលើ Google Maps", url=maps_url)])
+        buttons.append([
+            InlineKeyboardButton("🧹 សម្អាតសារ", callback_data="btn_clean_chat"),
+            InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+        ])
+        await safe_edit_text(status, vision_loc, reply_markup=InlineKeyboardMarkup(buttons))
+
+        # If estimated coordinates in Cambodia were found, send native Telegram map pin
+        import re
+        coords_match = re.search(r"(\d{1,2}\.\d{3,8})[,\s]+(\d{2,3}\.\d{3,8})", vision_loc)
+        if coords_match:
+            try:
+                plat, plon = float(coords_match.group(1)), float(coords_match.group(2))
+                if 9.0 <= plat <= 15.5 and 102.0 <= plon <= 108.0:
+                    await update.message.reply_location(latitude=plat, longitude=plon)
+            except Exception as e_loc:
+                logger.debug(f"Could not reply estimated location pin: {e_loc}")
 
     except Exception as e:
         logger.error(f"Error handling document image: {e}")

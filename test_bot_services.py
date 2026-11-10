@@ -315,6 +315,19 @@ def test_image_location_service():
     msg = format_photo_gps_message(loc_dummy, "28°C")
     assert "រាជធានីភ្នំពេញ" in msg
     assert "Google Maps" in msg
+
+    # Test Vision AI Maps URL extraction helper
+    from services.image_location_service import extract_maps_url_from_vision_text
+    sample_vision_coords = "📍 **ការវិភាគទីតាំងពីរូបភាព**\n• ឈ្មោះទីតាំង៖ ប្រាសាទអង្គរវត្ត\n• កូអរដោនេប៉ាន់ស្មាន: 13.4125, 103.8670"
+    url_coords = extract_maps_url_from_vision_text(sample_vision_coords)
+    assert url_coords == "https://www.google.com/maps?q=13.4125,103.867"
+    print(f"  - Vision coordinate Maps URL: {url_coords}")
+
+    sample_vision_landmark = "📍 **ការវិភាគទីតាំងពីរូបភាព**\n• ឈ្មោះទីតាំង៖ រង្វង់មូលវិមានឯករាជ្យ\n• ខេត្ត/រាជធានី៖ រាជធានីភ្នំពេញ"
+    url_landmark = extract_maps_url_from_vision_text(sample_vision_landmark)
+    assert url_landmark and "google.com/maps/search" in url_landmark
+    print(f"  - Vision landmark Maps URL: {url_landmark}")
+
     print("  [OK] Image Location Extraction Service verified!")
 
 def test_clean_chat_and_auto_cleanup():
