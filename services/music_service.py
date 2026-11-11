@@ -132,31 +132,53 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"Direct URL download failed: {e}")
 
-    # 3. Primary Strategy: Fast YouTube Search with Single-Step Direct Download
+    # 3. Primary Strategy: Multi-Candidate YouTube Search (skips bot-challenged / sign-in gated candidates)
+    last_error = ""
     yt_search_queries = [
-        f"ytsearch1:{query}",
-        f"ytsearch1:{query} audio",
+        f"ytsearch5:{query}",
+        f"ytsearch5:{query} audio",
     ]
 
-    last_error = ""
-    for search_target in yt_search_queries:
+    for search_query in yt_search_queries:
+        candidates = []
         try:
-            with yt_dlp.YoutubeDL(ydl_opts_base) as ydl:
-                info = ydl.extract_info(search_target, download=True)
-                if not info:
-                    continue
-                entries = info.get("entries")
-                entry = entries[0] if (entries is not None and len(entries) > 0) else info
-                if not entry:
-                    continue
+            ydl_search_opts = {
+                "quiet": True,
+                "extract_flat": True,
+                "skip_download": True,
+                "socket_timeout": 15,
+            }
+            with yt_dlp.YoutubeDL(ydl_search_opts) as ydl_s:
+                search_info = ydl_s.extract_info(search_query, download=False)
+                candidates = (search_info.get("entries") or []) if search_info else []
+        except Exception as e_s:
+            logger.warning(f"Flat search for '{search_query}' failed: {e_s}")
 
-                # Filter out short clips/teasers (< 45 seconds)
-                dur = entry.get("duration") or 0
-                if dur >= 45 or search_target == yt_search_queries[-1]:
+        if not candidates:
+            continue
+
+        for cand in candidates:
+            if not cand:
+                continue
+            dur = cand.get("duration") or 0
+            # Skip short snippets/teasers under 45s unless no other duration info
+            if 0 < dur < 45:
+                continue
+
+            vid = cand.get("id")
+            cand_url = cand.get("url") if (cand.get("url") and "http" in str(cand.get("url"))) else f"https://www.youtube.com/watch?v={vid}"
+
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts_base) as ydl_dl:
+                    info = ydl_dl.extract_info(cand_url, download=True)
+                    if not info:
+                        continue
+                    entry = info["entries"][0] if ("entries" in info and info["entries"]) else info
                     return _process_downloaded_entry(entry, temp_dir)
-        except Exception as e_yt:
-            last_error = str(e_yt)
-            logger.warning(f"YouTube search attempt '{search_target}' failed: {e_yt}")
+            except Exception as e_cand:
+                last_error = str(e_cand)
+                logger.warning(f"Candidate '{vid}' download failed ({e_cand}), probing next candidate...")
+                continue
 
     # 4. Secondary Strategy: SoundCloud search fallback (strictly >50s, DRM-safe, relevant match)
     try:
