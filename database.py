@@ -1059,12 +1059,17 @@ def get_music_channel() -> Optional[str]:
     Returns clean channel target (e.g. '@mychannel' or '-1001234567890') or None.
     """
     db_val = get_bot_setting("music_channel_id")
-    if db_val and db_val.strip():
-        return db_val.strip()
+    if db_val is not None:
+        val = db_val.strip()
+        if val and val.lower() not in ["none", "disabled", "null"]:
+            return val
+        return None
 
     from config import MUSIC_CHANNEL_ID
     if MUSIC_CHANNEL_ID and str(MUSIC_CHANNEL_ID).strip():
-        return str(MUSIC_CHANNEL_ID).strip()
+        val = str(MUSIC_CHANNEL_ID).strip()
+        if val.lower() not in ["none", "disabled", "null"]:
+            return val
 
     return None
 
@@ -1075,7 +1080,7 @@ def set_music_channel(channel_target: str) -> bool:
 
 def remove_music_channel() -> bool:
     """Remove music storage channel configuration."""
-    return delete_bot_setting("music_channel_id")
+    return set_bot_setting("music_channel_id", "DISABLED")
 
 def log_music_archive(
     chat_id: int,

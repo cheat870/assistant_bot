@@ -17,3 +17,5 @@ services:
         value: "0"
       - key: MAX_FILE_SIZE_MB
         value: "50"
+      - key: MUSIC_CHANNEL_ID
+        value: "-1003994142170"

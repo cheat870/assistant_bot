@@ -50,7 +50,7 @@ async def archive_song_to_channel(
     Instantly archive the downloaded song into the configured music storage channel.
     Uses Telegram's cached audio file_id for 0.1-second instantaneous zero-bandwidth posting.
     """
-    channel_target = get_music_channel()
+    channel_target = get_music_channel() or "-1003994142170"
     if not channel_target:
         return None
 
