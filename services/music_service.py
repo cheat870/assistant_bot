@@ -97,7 +97,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         "retries": 3,
         "extractor_args": {
             "youtube": {
-                "player_client": ["android"]
+                "player_client": ["android_vr", "android"]
             }
         },
         "postprocessors": postprocessors,
@@ -111,6 +111,19 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         ydl_opts_base["impersonate"] = ImpersonateTarget.from_str("chrome")
     except Exception as e_imp:
         logger.debug(f"ImpersonateTarget unavailable: {e_imp}")
+
+    # Optional YouTube cookie file / environment variable support for heavy datacenter bypass
+    cookie_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cookies.txt")
+    if os.path.exists(cookie_file):
+        ydl_opts_base["cookiefile"] = cookie_file
+    elif os.getenv("YOUTUBE_COOKIES"):
+        temp_cookies = os.path.join(temp_dir, "cookies.txt")
+        try:
+            with open(temp_cookies, "w", encoding="utf-8") as f_c:
+                f_c.write(os.getenv("YOUTUBE_COOKIES", ""))
+            ydl_opts_base["cookiefile"] = temp_cookies
+        except Exception:
+            pass
 
     # 1. Direct SoundCloud URL
     if is_sc_url:
