@@ -136,35 +136,27 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
     yt_search_queries = [
         f"ytsearch1:{query}",
         f"ytsearch1:{query} audio",
-        f"ytsearch1:{query} full song",
     ]
 
     last_error = ""
     for search_target in yt_search_queries:
-        for client_candidate in [["android"], ["android_vr"], None]:
-            try:
-                opts = dict(ydl_opts_base)
-                if client_candidate:
-                    opts["extractor_args"] = {"youtube": {"player_client": client_candidate}}
-                else:
-                    opts.pop("extractor_args", None)
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts_base) as ydl:
+                info = ydl.extract_info(search_target, download=True)
+                if not info:
+                    continue
+                entries = info.get("entries")
+                entry = entries[0] if (entries is not None and len(entries) > 0) else info
+                if not entry:
+                    continue
 
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    info = ydl.extract_info(search_target, download=True)
-                    if not info:
-                        continue
-                    entries = info.get("entries")
-                    entry = entries[0] if (entries is not None and len(entries) > 0) else info
-                    if not entry:
-                        continue
-
-                    # Filter out short clips/teasers (< 45 seconds)
-                    dur = entry.get("duration") or 0
-                    if dur >= 45 or search_target == yt_search_queries[-1]:
-                        return _process_downloaded_entry(entry, temp_dir)
-            except Exception as e_yt:
-                last_error = str(e_yt)
-                logger.warning(f"YouTube search attempt '{search_target}' with client {client_candidate} failed: {e_yt}")
+                # Filter out short clips/teasers (< 45 seconds)
+                dur = entry.get("duration") or 0
+                if dur >= 45 or search_target == yt_search_queries[-1]:
+                    return _process_downloaded_entry(entry, temp_dir)
+        except Exception as e_yt:
+            last_error = str(e_yt)
+            logger.warning(f"YouTube search attempt '{search_target}' failed: {e_yt}")
 
     # 4. Secondary Strategy: SoundCloud search fallback (strictly >50s, DRM-safe, relevant match)
     try:
@@ -257,10 +249,10 @@ def _process_downloaded_entry(entry: Dict[str, Any], temp_dir: str) -> Dict[str,
     }
 
 async def download_song(query: str) -> Dict[str, Any]:
-    """Async wrapper to search and download song audio with generous 75-second timeout."""
+    """Async wrapper to search and download song audio with generous 120-second timeout."""
     return await asyncio.wait_for(
         asyncio.to_thread(_search_and_download_song_sync, query),
-        timeout=75.0
+        timeout=120.0
     )
 
 def _identify_tiktok_sound_sync(url: str) -> Dict[str, Any]:
