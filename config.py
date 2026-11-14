@@ -10,7 +10,7 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(dotenv_path=BASE_DIR / ".env")
 
 # Telegram Bot Token
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or "8747197308:AAG8Z1eXU-JQ6vrJ1EoyrIufqVZY1f3lm9g"
 
 # Admin ID (for /broadcast command)
 ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "1667275809"))
