@@ -1,6 +1,6 @@
 ---
 title: Telegram Smart Assistant Bot
-emoji: 🇰🇭
+emoji: 🤖
 colorFrom: blue
 colorTo: indigo
 sdk: gradio
