@@ -1,3 +1,12 @@
+---
+title: Telegram Smart Assistant Bot
+emoji: 🇰🇭
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+---
+
 # 🇰🇭 Telegram Smart Assistant Bot (Hub 4.0 Pro Ultimate)
 
 Telegram Bot ជំនួយការឆ្លាតវៃពហុមុខងារ (Multi-purpose Smart Assistant Hub) បង្កើតឡើងយ៉ាងពិសេសសម្រាប់អ្នកប្រើប្រាស់នៅប្រទេសកម្ពុជា 🇰🇭។
