@@ -3,8 +3,11 @@ title: Telegram Smart Assistant Bot
 emoji: 🇰🇭
 colorFrom: blue
 colorTo: indigo
-sdk: docker
-app_port: 7860
+sdk: gradio
+sdk_version: 4.44.0
+app_file: app.py
+pinned: false
+license: mit
 ---
 
 # 🇰🇭 Telegram Smart Assistant Bot (Hub 4.0 Pro Ultimate)
