@@ -79,7 +79,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         postprocessors.append({
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3",
-            "preferredquality": "320",
+            "preferredquality": "192",
         })
 
     is_url = query.startswith("http://") or query.startswith("https://")
@@ -168,7 +168,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
                 if not sc_url:
                     continue
                 dur = raw_entry.get("duration") or 0
-                if 0 < dur <= 45:
+                if 0 < dur <= 40 or dur > 660:
                     continue
                 try:
                     sc_dl = ydl.extract_info(sc_url, download=True)
@@ -209,7 +209,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
             if not cand:
                 continue
             dur = cand.get("duration") or 0
-            if 0 < dur < 45:
+            if 0 < dur <= 40 or dur > 660:
                 continue
 
             vid = cand.get("id")
@@ -353,7 +353,7 @@ async def _extract_song_via_gemini(image_bytes: bytes) -> Optional[str]:
     return None
 
 async def _extract_song_via_ocr(image_bytes: bytes) -> Optional[str]:
-    """Extract song title & artist from screenshot using OCR.Space free engine."""
+    """Extract song title & artist from screenshot using OCR.Space free engine with smart filtering."""
     import urllib.request
     import urllib.parse
     import json
@@ -376,21 +376,55 @@ async def _extract_song_via_ocr(image_bytes: bytes) -> Optional[str]:
         raw_text = res.get('ParsedResults', [{}])[0].get('ParsedText', '')
         if not raw_text:
             return None
+
         lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
-        cleaned_tokens = []
+        telegram_ui = [
+            '/song', '/music', 'telegram', ' am', ' pm',
+            'ទាញយក', 'មិនអាច', 'រង់ចាំ', 'កំហុស', 'កំពុងផ្ញើ', 'សម្រេច',
+            'subscribers', 'views', 'subscribe', 'comments', 'share',
+            'helloworld', 'ocr.space', 'demo key', 'ocr api', 'testing only'
+        ]
+        candidates = []
         for l in lines:
-            if any(banner in l.lower() for banner in ['helloworld', 'ocr.space', 'demo key', 'ocr api', 'testing only']):
+            # Strip tags and boilerplate first
+            l_clean = re.sub(r'\[OFFICIAL.*?\]|\(OFFICIAL.*?\)|OFFICIAL MUSIC.*?|OFFICIAL MV.*?|MV', '', l, flags=re.IGNORECASE)
+            l_clean = re.sub(r'^ចម្រុះ\s*[-:]*\s*', '', l_clean)
+            l_clean = re.sub(r'[\r\n\t]+', ' ', l_clean)
+            l_clean = re.sub(r'\b\d+:\d+\b', '', l_clean)
+            l_clean = re.sub(r'[^A-Za-z0-9\u1780-\u17FF\-\s\'\?]+', ' ', l_clean)
+            l_clean = re.sub(r'\s+', ' ', l_clean).strip()
+
+            l_lower = l_clean.lower()
+            if any(ui in l_lower for ui in telegram_ui):
                 continue
-            l = re.sub(r'\[OFFICIAL.*?\]|\(OFFICIAL.*?\)|OFFICIAL MUSIC.*?|OFFICIAL MV.*?|MV', '', l, flags=re.IGNORECASE)
-            l = re.sub(r'^ចម្រុះ\s*[-:]*\s*', '', l)
-            l = re.sub(r'[\r\n\t]+', ' ', l).strip()
-            l = re.sub(r'\b\d+:\d+\b', '', l).strip()
-            words = re.findall(r'[A-Za-z0-9\u1780-\u17FF\'\?]+', l)
-            clean_l = ' '.join(w for w in words if len(w) >= 2)
-            if clean_l and not any(skip in clean_l.lower() for skip in ['views', 'subscribers', 'likes', 'subscribe', 'comments']):
-                cleaned_tokens.append(clean_l)
-        if cleaned_tokens:
-            return ' '.join(cleaned_tokens[:2])
+            if re.match(r'^\d+[\s:\d]*[ap]m?$', l_lower):
+                continue
+            if len(l_clean) < 3:
+                continue
+
+            words = [w for w in l_clean.split() if len(w) >= 2 and not w.isdigit()]
+            if not words:
+                continue
+            candidates.append(l_clean)
+
+        if not candidates:
+            return None
+
+        # Priority 1: Candidate with dash (Artist - Title)
+        dash_candidates = [c for c in candidates if '-' in c and len(c.split()) >= 2]
+        if dash_candidates:
+            cand = dash_candidates[-1].strip(' -')
+            cand_words = [w for w in cand.split() if w not in ['-', '?', ':']]
+            other_eng = [c for c in candidates if c != cand and re.search(r'[A-Za-z]{3,}', c)]
+            if len(cand_words) <= 2 and other_eng:
+                return f"{cand_words[0]} - {other_eng[0]}".strip(' -')
+            return cand
+
+        # Priority 2: Combine top two candidates
+        if len(candidates) >= 2:
+            return f"{candidates[0]} - {candidates[1]}".strip(' -')
+
+        return candidates[-1].strip(' -')
     except Exception as e_ocr:
         logger.warning(f"OCR song recognition failed: {e_ocr}")
     return None

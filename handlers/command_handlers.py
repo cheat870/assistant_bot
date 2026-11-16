@@ -1678,7 +1678,8 @@ async def song_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if "timed out" in err_str or "timeout" in err_str:
             await safe_edit_text(status_msg, "❌ ការ Upload ឯកសារចម្រៀងទៅ Telegram យឺតលើសម៉ោងកំណត់។ សូមសាកល្បងម្ដងទៀត។")
         else:
-            await safe_edit_text(status_msg, f"❌ មិនអាចទាញយកចម្រៀងបានទេ៖ {str(e)[:150]}")
+            err_msg = str(e).strip() or "រកមិនឃើញបទចម្រៀង"
+            await safe_edit_text(status_msg, f"❌ មិនអាចទាញយកចម្រៀងបានទេ៖ {err_msg[:150]}")
 
 async def setsongchannel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command to set/link music storage channel: /setsongchannel <@channel or -100xxxxxxxxx>."""
@@ -2446,9 +2447,14 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 except Exception:
                     pass
                 return
+            except asyncio.TimeoutError:
+                logger.warning(f"Song from photo download timeout for query: {extracted_query}")
+                await safe_edit_text(status, "❌ ការទាញយកចម្រៀងលើសម៉ោងកំណត់ (Timeout)។ សូមសាកល្បងម្ដងទៀត ឬវាយ `/song <ឈ្មោះបទ>` ដោយផ្ទាល់។")
+                return
             except Exception as e_dl:
                 logger.error(f"Song from photo download error: {e_dl}")
-                await safe_edit_text(status, f"❌ មិនអាចទាញយកចម្រៀងបានទេ៖ {str(e_dl)[:150]}")
+                err_msg = str(e_dl).strip() or "រកមិនឃើញបទចម្រៀង"
+                await safe_edit_text(status, f"❌ មិនអាចទាញយកចម្រៀងបានទេ៖ {err_msg[:150]}")
                 return
 
         # Check if caption explicitly requests AI Content Creator Studio (Facebook/TikTok)
