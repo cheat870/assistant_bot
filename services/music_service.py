@@ -23,10 +23,14 @@ def _get_ffmpeg_path() -> Optional[str]:
 def is_query_relevant_match(query: str, title: str, uploader: str) -> bool:
     """Check if the search result contains significant tokens from the query to avoid downloading unrelated tracks."""
     tokens = [w.lower() for w in re.findall(r'[a-zA-Z0-9\u1780-\u17FF]+', query) if len(w) >= 2]
+    single_letters = ''.join(re.findall(r'\b[a-zA-Z]\b', query)).lower()
+    if len(single_letters) >= 2 and single_letters not in tokens:
+        tokens.append(single_letters)
     if not tokens:
         return True
-    target = f"{title} {uploader}".lower()
-    matched = [t for t in tokens if t in target]
+    target = f"{title} {uploader}".lower().replace('.', '').replace('-', '').replace(' ', '')
+    raw_target = f"{title} {uploader}".lower()
+    matched = [t for t in tokens if t in target or t in raw_target]
     return len(matched) >= max(1, len(tokens) // 2)
 
 def is_cambodian_music_query(q: str) -> bool:
@@ -109,7 +113,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
 
     # Robust options with android client bypass & browser TLS impersonation for cloud datacenter checks
     ydl_opts_base = {
-        "format": "bestaudio/18/best",
+        "format": "18/bestaudio/best",
         "outtmpl": outtmpl,
         "noplaylist": True,
         "quiet": True,
@@ -119,7 +123,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         "retries": 2,
         "extractor_args": {
             "youtube": {
-                "player_client": ["android"]
+                "player_client": ["android", "ios", "web"]
             }
         },
         "postprocessors": postprocessors,
@@ -213,6 +217,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         nonlocal last_error
         try:
             ydl_opts_sc = dict(ydl_opts_base)
+            ydl_opts_sc["format"] = "bestaudio/best"
             ydl_opts_sc["concurrent_fragment_downloads"] = 5
             with yt_dlp.YoutubeDL(ydl_opts_sc) as ydl:
                 sc_search_opts = {
