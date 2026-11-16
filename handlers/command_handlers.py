@@ -2301,18 +2301,19 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         reply_text = await process_voice_ai(bytes(voice_bytes), mime_type="audio/ogg")
         await safe_edit_text(status, reply_text)
 
-        # Two-Way Voice Assistant: Synthesize speech in Khmer and reply with voice audio!
-        try:
-            from services.tts_service import generate_tts_audio
-            clean_reply = re.sub(r"[*_`#~\[\]()>]", "", reply_text).strip()
-            if clean_reply and len(clean_reply) <= 600:
-                audio_fp = generate_tts_audio(clean_reply, lang="km")
-                await update.message.reply_voice(
-                    voice=audio_fp,
-                    caption="🗣️ *ឆ្លើយតបជាសំឡេង AI (Two-Way Voice)* ✨"
-                )
-        except Exception as e_voice:
-            logger.warning(f"Could not send voice reply: {e_voice}")
+        # Two-Way Voice Assistant: Synthesize speech in Khmer and reply with voice audio ONLY on successful answers
+        if not reply_text.startswith("❌") and not reply_text.startswith("⚠️"):
+            try:
+                from services.tts_service import generate_tts_audio
+                clean_reply = re.sub(r"[*_`#~\[\]()>]", "", reply_text).strip()
+                if clean_reply and len(clean_reply) <= 600:
+                    audio_fp = generate_tts_audio(clean_reply, lang="km")
+                    await update.message.reply_voice(
+                        voice=audio_fp,
+                        caption="🗣️ *ឆ្លើយតបជាសំឡេង AI (Two-Way Voice)* ✨"
+                    )
+            except Exception as e_voice:
+                logger.warning(f"Could not send voice reply: {e_voice}")
 
     except Exception as e:
         logger.error(f"Error handling voice message: {e}")

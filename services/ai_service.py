@@ -133,6 +133,16 @@ def format_gemini_error(err: Exception) -> str:
     """Format Gemini error into a helpful Khmer user message."""
     err_str = str(err)
     err_lower = err_str.lower()
+    if any(k in err_lower for k in ["401", "unauthenticated", "api key not valid", "invalid api key"]):
+        return (
+            "⚠️ *Google Gemini API Key មិនត្រឹមត្រូវ (401 Unauthenticated)*\n\n"
+            "👉 *មូលហេតុ៖* API Key បច្ចុប្បន្នមិនមែនជា Key របស់ Google AI Studio ទេ (Key ត្រឹមត្រូវតែងតែចាប់ផ្តើមដោយ `AIzaSy...`)។\n\n"
+            "💡 *ដំណោះស្រាយងាយៗ (ឥតគិតថ្លៃ ១០០%):*\n"
+            "1. ចូលទៅកាន់គេហទំព័រ [aistudio.google.com/apikey](https://aistudio.google.com/apikey)\n"
+            "2. ចុចយក **'Create API key'** (បង្កើតដោយឥតគិតថ្លៃក្នុងរយៈពេល ១០ វិនាទី)\n"
+            "3. ចម្លង (Copy) Key ដែលចាប់ផ្តើមដោយ `AIzaSy...`\n"
+            "4. ចូលទៅកាន់ **Render Dashboard** ➔ **Settings** ➔ **Environment Variables** ➔ ប្តូរតម្លៃ `GEMINI_API_KEY` រួច Save!"
+        )
     if any(k in err_lower for k in ["429", "quota", "resource_exhausted", "exceeded your current quota"]):
         return (
             "⚠️ *Google Gemini បានកំណត់កម្រិតសំណួរ (Rate Limit 429 / Quota)*\n\n"
@@ -251,10 +261,11 @@ async def query_gemini_live_search(user_query: str, chat_id: Optional[int] = Non
 
 async def process_voice_ai(voice_bytes: bytes, mime_type: str = "audio/ogg") -> str:
     """Understand and respond to Telegram voice message using Gemini."""
-    if not (GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here"):
+    if not (GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here") or GEMINI_API_KEY.startswith("AQ."):
         return (
             "🎙️ *បានទទួលសារជាសំឡេង (Voice Message)!*\n\n"
-            "💡 ដើម្បីឱ្យ Bot អាចស្តាប់យល់ និងឆ្លើយតបជាភាសាខ្មែរ សូមបន្ថែម `GEMINI_API_KEY` ទៅក្នុង Render Environment Variables នៃ Bot។"
+            "⚠️ *Google Gemini API Key មិនទាន់ត្រឹមត្រូវ (401)*\n"
+            "💡 ដើម្បីឱ្យ Bot អាចស្តាប់យល់ និងឆ្លើយតបជាភាសាខ្មែរ សូមចូលយក Key ឥតគិតថ្លៃពី [aistudio.google.com/apikey](https://aistudio.google.com/apikey) (Key ចាប់ផ្តើមដោយ `AIzaSy...`) រួចដាក់ក្នុង Render Environment Variables (`GEMINI_API_KEY`)។"
         )
         
     try:
