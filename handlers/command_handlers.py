@@ -1,5 +1,7 @@
 import re
 import html
+import io
+import shutil
 import asyncio
 import logging
 from datetime import datetime, timedelta
@@ -2318,6 +2320,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle photo messages: automatically extract location directly from image (EXIF GPS or AI Geolocation), or handle QR / Vision."""
+    import re
     photos = update.message.photo
     if not photos:
         return
@@ -2605,7 +2608,6 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
         await safe_edit_text(status, vision_loc, reply_markup=InlineKeyboardMarkup(buttons))
 
         # If estimated coordinates in Cambodia were found, send native Telegram map pin
-        import re
         coords_match = re.search(r"(\d{1,2}\.\d{3,8})[,\s]+(\d{2,3}\.\d{3,8})", vision_loc)
         if coords_match:
             try:
@@ -2716,7 +2718,6 @@ async def handle_document_image(update: Update, context: ContextTypes.DEFAULT_TY
         await safe_edit_text(status, vision_loc, reply_markup=InlineKeyboardMarkup(buttons))
 
         # If estimated coordinates in Cambodia were found, send native Telegram map pin
-        import re
         coords_match = re.search(r"(\d{1,2}\.\d{3,8})[,\s]+(\d{2,3}\.\d{3,8})", vision_loc)
         if coords_match:
             try:
@@ -2806,7 +2807,6 @@ async def handle_user_video_message(update: Update, context: ContextTypes.DEFAUL
         await safe_edit_text(status, vision_loc, reply_markup=InlineKeyboardMarkup(buttons))
 
         # If estimated coordinates in Cambodia were found, send native Telegram map pin
-        import re
         coords_match = re.search(r"(\d{1,2}\.\d{3,8})[,\s]+(\d{2,3}\.\d{3,8})", vision_loc)
         if coords_match:
             try:
