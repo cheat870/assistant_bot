@@ -87,17 +87,17 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
 
     # Robust options with android client bypass & browser TLS impersonation for cloud datacenter checks
     ydl_opts_base = {
-        "format": "bestaudio/best",
+        "format": "bestaudio/18/best",
         "outtmpl": outtmpl,
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
         "ignoreerrors": False,
-        "socket_timeout": 20,
-        "retries": 3,
+        "socket_timeout": 15,
+        "retries": 2,
         "extractor_args": {
             "youtube": {
-                "player_client": ["android_vr", "android"]
+                "player_client": ["android"]
             }
         },
         "postprocessors": postprocessors,
@@ -170,7 +170,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         if not candidates:
             continue
 
-        for cand in candidates:
+        for cand in candidates[:3]:
             if not cand:
                 continue
             dur = cand.get("duration") or 0
@@ -193,36 +193,38 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
                 logger.warning(f"Candidate '{vid}' download failed ({e_cand}), probing next candidate...")
                 continue
 
-    # 4. Secondary Strategy: SoundCloud search fallback (strictly >50s, DRM-safe, relevant match)
+    # 4. Secondary Strategy: SoundCloud search fallback (strictly >50s, DRM-safe, fast)
     try:
         ydl_opts_sc = dict(ydl_opts_base)
         ydl_opts_sc["concurrent_fragment_downloads"] = 5
         with yt_dlp.YoutubeDL(ydl_opts_sc) as ydl:
-            # Process=False extracts playlist entries without evaluating DRM on every track
-            info = ydl.extract_info(f"scsearch5:{query}", download=False, process=False)
-            if info and "entries" in info and info["entries"]:
-                query_tokens = [w.lower() for w in re.split(r'[\s\-_|/]+', query) if len(w) >= 3]
-                for raw_entry in info["entries"]:
-                    if not raw_entry:
-                        continue
-                    sc_url = raw_entry.get("url")
-                    if not sc_url:
-                        continue
+            sc_search_opts = {
+                "quiet": True,
+                "extract_flat": True,
+                "skip_download": True,
+                "socket_timeout": 15,
+            }
+            with yt_dlp.YoutubeDL(sc_search_opts) as ydl_sc_s:
+                sc_info = ydl_sc_s.extract_info(f"scsearch5:{query}", download=False)
+                sc_entries = (sc_info.get("entries") or []) if sc_info else []
 
-                    # Safely probe individual candidate
-                    try:
-                        sc_info = ydl.extract_info(sc_url, download=False)
-                    except Exception:
-                        continue
-                    if not sc_info or (sc_info.get("duration") or 0) <= 50 or sc_info.get("drm"):
-                        continue
-
-                    sc_text = f"{sc_info.get('title', '')} {sc_info.get('uploader', '')}".lower()
-                    if query_tokens and not any(t in sc_text for t in query_tokens):
-                        continue
-
-                    ydl.process_ie_result(sc_info, download=True)
-                    return _process_downloaded_entry(sc_info, temp_dir)
+            for raw_entry in sc_entries:
+                if not raw_entry:
+                    continue
+                sc_url = raw_entry.get("url")
+                if not sc_url:
+                    continue
+                dur = raw_entry.get("duration") or 0
+                if 0 < dur <= 45:
+                    continue
+                try:
+                    sc_dl = ydl.extract_info(sc_url, download=True)
+                    if sc_dl:
+                        entry = sc_dl["entries"][0] if ("entries" in sc_dl and sc_dl["entries"]) else sc_dl
+                        return _process_downloaded_entry(entry, temp_dir)
+                except Exception as e_sc_item:
+                    logger.debug(f"SoundCloud candidate failed: {e_sc_item}")
+                    continue
     except Exception as e_sc:
         logger.warning(f"SoundCloud fallback failed: {e_sc}")
 
