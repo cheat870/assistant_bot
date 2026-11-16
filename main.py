@@ -108,6 +108,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log errors caused by Updates and suppress transient Telegram polling conflicts during cloud redeployments."""
+    import telegram.error
+    err = context.error
+    if isinstance(err, telegram.error.Conflict):
+        logger.warning(f"Telegram polling conflict (transient during cloud redeploy): {err}")
+        return
+    if isinstance(err, telegram.error.NetworkError):
+        logger.warning(f"Telegram network glitch: {err}")
+        return
+    logger.error(f"Exception while handling an update: {err}", exc_info=err)
+
 async def post_init(application: Application):
     """Register official commands in Telegram native menu button."""
     commands = [
@@ -330,6 +342,9 @@ def main():
     
     # Register Daily Scheduler (4AM Holidays, 5AM Weather, Reminders)
     setup_scheduler(app)
+    
+    # Register Global Error Handler (suppresses transient cloud redeployment conflicts)
+    app.add_error_handler(error_handler)
     
     print("\n✅ Bot ដំណើរការរួចរាល់ហើយ! (Bot is running via polling...)")
     print("👉 ចូល Telegram រួចវាយពាក្យ /start ដើម្បីសាកល្បង។\n")

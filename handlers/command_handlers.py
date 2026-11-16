@@ -1556,23 +1556,43 @@ async def translate_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Music Finder & MP3 Downloader Handler
 # -------------------------------------------------------------
 async def song_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Search & download song MP3: /song <query>."""
+    """Search & download song MP3: /song <query> or reply to a photo with /song."""
     query = " ".join(context.args) if context.args else ""
-    if not query:
+    reply_msg = update.message.reply_to_message if update.message else None
+
+    if reply_msg and reply_msg.photo:
+        photo = reply_msg.photo[-1]
+        status_msg = await update.message.reply_text("🖼️ *បានទទួលរូបភាព! AI កំពុងស្កេនរកឈ្មោះបទចម្រៀងពីរូបភាព...* 🔍🎶", parse_mode="Markdown")
+        try:
+            tg_file = await context.bot.get_file(photo.file_id)
+            img_bytes = bytes(await tg_file.download_as_bytearray())
+            from services.music_service import extract_song_query_from_image
+            extracted_query = await extract_song_query_from_image(img_bytes, extra_hint=query)
+            if not extracted_query:
+                await safe_edit_text(status_msg, "❌ មិនអាចស្គាល់ឈ្មោះបទចម្រៀងពីរូបភាពនេះបានទេ។ សូមសាកល្បងវាយ `/song <ឈ្មោះបទ>` ដោយផ្ទាល់។")
+                return
+            query = extracted_query
+            await safe_edit_text(status_msg, f"🔍 *បានស្កេនឃើញបទ៖* `{query}` 🎶\n_កំពុងទាញយក file MP3 កម្រិតច្បាស់..._")
+        except Exception as e_scan:
+            logger.warning(f"Error scanning song from reply photo: {e_scan}")
+            await safe_edit_text(status_msg, f"❌ បរាជ័យក្នុងការស្កេនរូបភាព៖ {e_scan}")
+            return
+    elif not query:
         await update.message.reply_text(
             "🎧 *របៀបស្វែងរក និងទាញយកចម្រៀង MP3 320kbps៖*\n\n"
-            "សូមវាយ៖ `/song <ឈ្មោះបទចម្រៀង ឬឈ្មោះតារា>`\n\n"
+            "សូមវាយ៖ `/song <ឈ្មោះបទចម្រៀង ឬឈ្មោះតារា>`\n"
             "• ឧទាហរណ៍៖ `/song ស្រលាញ់គ្នាម្តងទៀតបានទេ`\n"
             "• ឧទាហរណ៍៖ `/song shape of you`\n\n"
-            "Bot នឹងស្វែងរក និងទាញយក file MP3 កម្រិតច្បាស់ជូនភ្លាមៗ!",
+            "📸 *ឬ Upload រូបភាព Screenshot បទចម្រៀងអមដោយ Caption:* `/song`\n"
+            "Bot នឹងស្កេនរកឈ្មោះបទពីរូបភាព និងទាញយកជូនភ្លាមៗ!",
             parse_mode="Markdown"
         )
         return
-
-    status_msg = await update.message.reply_text(
-        f"🔍 *កំពុងស្វែងរក និងទាញយកបទចម្រៀង៖* `{query}` 🎶\n_សូមរង់ចាំប្រហែល ៥-១០ វិនាទី..._",
-        parse_mode="Markdown"
-    )
+    else:
+        status_msg = await update.message.reply_text(
+            f"🔍 *កំពុងស្វែងរក និងទាញយកបទចម្រៀង៖* `{query}` 🎶\n_សូមរង់ចាំប្រហែល ៥-១០ វិនាទី..._",
+            parse_mode="Markdown"
+        )
     await update.message.chat.send_action("upload_voice")
 
     from services.video_downloader import cleanup_file
@@ -2337,6 +2357,95 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
             except Exception as e_loc:
                 logger.warning(f"Could not send native location: {e_loc}")
             return
+
+        # Check if caption explicitly requests Song / Music recognition & download
+        is_song_request = any(k in caption_lower for k in [
+            "/song", "/music", "រកចម្រៀង", "រកបទ", "ទាញយកចម្រៀង", "ចម្រៀង", "song"
+        ])
+        if is_song_request:
+            extra_hint = re.sub(r'/(song|music)|(រកចម្រៀង|រកបទ|ទាញយកចម្រៀង|ចម្រៀង|song)', '', caption, flags=re.IGNORECASE).strip()
+            status = await update.message.reply_text("🖼️ *បានទទួលរូបភាព! AI កំពុងស្កេនរកឈ្មោះបទចម្រៀងពីរូបភាព...* 🔍🎶", parse_mode="Markdown")
+            from services.music_service import extract_song_query_from_image, download_song
+            extracted_query = await extract_song_query_from_image(img_bytes, extra_hint=extra_hint)
+            if not extracted_query:
+                await safe_edit_text(status, "❌ មិនអាចស្គាល់ឈ្មោះបទចម្រៀងពីរូបភាពនេះបានទេ។ សូមសាកល្បងវាយ `/song <ឈ្មោះបទ>` ដោយផ្ទាល់។")
+                return
+
+            await safe_edit_text(status, f"🔍 *បានស្កេនឃើញបទ៖* `{extracted_query}` 🎶\n_កំពុងទាញយក file MP3 កម្រិតច្បាស់..._")
+            await update.message.chat.send_action("upload_voice")
+
+            from services.video_downloader import cleanup_file
+            try:
+                res = await download_song(extracted_query)
+                file_path = res["file_path"]
+                dur = int(res.get("duration", 0) or 0)
+                await safe_edit_text(status, f"📤 *ទាញយកបានសម្រេច!* កំពុងផ្ញើបទ `{res['title'][:35]}` ទៅ Telegram... 🎶")
+
+                caption_html = (
+                    f"🎧 <b>{html.escape(res['title'])}</b>\n"
+                    f"👤 <b>តារាចម្រៀង:</b> {html.escape(res['performer'])}\n"
+                    f"⏱️ <b>រយៈពេល:</b> {res['duration_str']}\n"
+                    f"📸 <i>(ស្កេនដោយ AI ពីរូបភាព)</i>\n\n"
+                    f"✨ Smart Assistant Bot 🎵"
+                )
+                sent_msg = None
+                with open(file_path, "rb") as audio_file:
+                    try:
+                        sent_msg = await update.message.reply_audio(
+                            audio=audio_file,
+                            title=res["title"],
+                            performer=res["performer"],
+                            duration=dur,
+                            caption=caption_html,
+                            parse_mode="HTML",
+                            read_timeout=300.0,
+                            write_timeout=300.0,
+                            connect_timeout=60.0,
+                        )
+                    except Exception:
+                        audio_file.seek(0)
+                        sent_msg = await update.message.reply_audio(
+                            audio=audio_file,
+                            title=res["title"],
+                            performer=res["performer"],
+                            duration=dur,
+                            caption=f"🎧 {res['title']}\n👤 {res['performer']}\n⏱️ {res['duration_str']}\n\n✨ Smart Assistant Bot 🎵",
+                        )
+                cleanup_file(file_path)
+
+                # Automatic Music Channel Archiving (@Song182)
+                try:
+                    from services.music_archive_service import archive_song_to_channel
+                    if sent_msg and sent_msg.audio:
+                        archive_res = await archive_song_to_channel(
+                            bot=context.bot,
+                            user=update.effective_user,
+                            song_data={**res, "query": extracted_query},
+                            sent_audio_file_id=sent_msg.audio.file_id
+                        )
+                        if archive_res and archive_res.get("success") and archive_res.get("post_url"):
+                            try:
+                                await sent_msg.edit_reply_markup(
+                                    reply_markup=InlineKeyboardMarkup([
+                                        [InlineKeyboardButton("📻 ស្ដាប់ក្នុង Music Channel", url=archive_res["post_url"])]
+                                    ])
+                                )
+                            except Exception:
+                                pass
+                except Exception as e_arch:
+                    logger.warning(f"Failed to auto-archive song from photo: {e_arch}")
+
+                try:
+                    import shutil
+                    shutil.rmtree(res["temp_dir"], ignore_errors=True)
+                    await status.delete()
+                except Exception:
+                    pass
+                return
+            except Exception as e_dl:
+                logger.error(f"Song from photo download error: {e_dl}")
+                await safe_edit_text(status, f"❌ មិនអាចទាញយកចម្រៀងបានទេ៖ {str(e_dl)[:150]}")
+                return
 
         # Check if caption explicitly requests AI Content Creator Studio (Facebook/TikTok)
         if any(k in caption_lower for k in ["/caption", "/content", "/post", "/script", "caption", "សរសេរ caption", "ផុសលក់"]):

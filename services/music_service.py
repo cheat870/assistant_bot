@@ -285,10 +285,10 @@ def _process_downloaded_entry(entry: Dict[str, Any], temp_dir: str) -> Dict[str,
     }
 
 async def download_song(query: str) -> Dict[str, Any]:
-    """Async wrapper to search and download song audio with generous 120-second timeout."""
+    """Async wrapper to search and download song audio with generous 150-second timeout."""
     return await asyncio.wait_for(
         asyncio.to_thread(_search_and_download_song_sync, query),
-        timeout=120.0
+        timeout=150.0
     )
 
 def _identify_tiktok_sound_sync(url: str) -> Dict[str, Any]:
@@ -322,3 +322,86 @@ async def identify_tiktok_sound(url: str) -> Dict[str, Any]:
         asyncio.to_thread(_identify_tiktok_sound_sync, url),
         timeout=25.0
     )
+
+# -------------------------------------------------------------
+# Image / Screenshot Song Recognition (OCR & AI Vision)
+# -------------------------------------------------------------
+async def _extract_song_via_gemini(image_bytes: bytes) -> Optional[str]:
+    """Extract song title & artist from image using Google Gemini Vision."""
+    from config import GEMINI_API_KEY
+    if not GEMINI_API_KEY or len(GEMINI_API_KEY) < 20 or GEMINI_API_KEY.startswith("your_") or GEMINI_API_KEY.startswith("AQ."):
+        return None
+    try:
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        image_part = types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+        prompt = (
+            "You are an expert music recognizer. Look at this image (which could be a YouTube, Spotify, "
+            "music player, or video screenshot, or song poster). "
+            "Extract the exact song title and singer/artist in English or Khmer. "
+            "Filter out boilerplate like 'ចម្រុះ -', '[OFFICIAL MV]', '[OFFICIAL MUSIC VIDEO]', 'MV', 'កម្រងវីដេអូ', 'Full Song', etc. "
+            "Return ONLY the clean search query like: <Artist> - <Song Title>. "
+            "If no song or music is detected, reply with 'NONE'."
+        )
+        resp = await asyncio.to_thread(client.models.generate_content, model="gemini-2.5-flash", contents=[image_part, prompt])
+        txt = resp.text.strip() if resp and resp.text else ""
+        if txt and "NONE" not in txt and len(txt) > 2:
+            return txt.strip('"`\'')
+    except Exception as e:
+        logger.warning(f"Gemini vision song recognition failed: {e}")
+    return None
+
+async def _extract_song_via_ocr(image_bytes: bytes) -> Optional[str]:
+    """Extract song title & artist from screenshot using OCR.Space free engine."""
+    import urllib.request
+    import urllib.parse
+    import json
+    import base64
+
+    def _do_ocr():
+        b64 = base64.b64encode(image_bytes).decode('utf-8')
+        data = urllib.parse.urlencode({
+            'apikey': 'K88796853888957',
+            'base64Image': 'data:image/jpeg;base64,' + b64,
+            'language': 'eng',
+            'isOverlayRequired': False
+        }).encode('utf-8')
+        req = urllib.request.Request('https://api.ocr.space/parse/image', data=data)
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+
+    try:
+        res = await asyncio.to_thread(_do_ocr)
+        raw_text = res.get('ParsedResults', [{}])[0].get('ParsedText', '')
+        if not raw_text:
+            return None
+        lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
+        cleaned_tokens = []
+        for l in lines:
+            if any(banner in l.lower() for banner in ['helloworld', 'ocr.space', 'demo key', 'ocr api', 'testing only']):
+                continue
+            l = re.sub(r'\[OFFICIAL.*?\]|\(OFFICIAL.*?\)|OFFICIAL MUSIC.*?|OFFICIAL MV.*?|MV', '', l, flags=re.IGNORECASE)
+            l = re.sub(r'^ចម្រុះ\s*[-:]*\s*', '', l)
+            l = re.sub(r'[\r\n\t]+', ' ', l).strip()
+            l = re.sub(r'\b\d+:\d+\b', '', l).strip()
+            words = re.findall(r'[A-Za-z0-9\u1780-\u17FF\'\?]+', l)
+            clean_l = ' '.join(w for w in words if len(w) >= 2)
+            if clean_l and not any(skip in clean_l.lower() for skip in ['views', 'subscribers', 'likes', 'subscribe', 'comments']):
+                cleaned_tokens.append(clean_l)
+        if cleaned_tokens:
+            return ' '.join(cleaned_tokens[:2])
+    except Exception as e_ocr:
+        logger.warning(f"OCR song recognition failed: {e_ocr}")
+    return None
+
+async def extract_song_query_from_image(image_bytes: bytes, extra_hint: str = "") -> Optional[str]:
+    """Extract song title & artist from image/screenshot using Gemini Vision or OCR."""
+    query = await _extract_song_via_gemini(image_bytes)
+    if not query:
+        query = await _extract_song_via_ocr(image_bytes)
+    if not query and extra_hint:
+        query = extra_hint.strip()
+    elif query and extra_hint and extra_hint.lower() not in query.lower():
+        query = f"{query} {extra_hint}".strip()
+    return query
