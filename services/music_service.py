@@ -145,55 +145,8 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"Direct URL download failed: {e}")
 
-    # 3. Primary Strategy: Multi-Candidate YouTube Search (skips bot-challenged / sign-in gated candidates)
+    # 3. Primary Fast Strategy: SoundCloud Audio Search (Zero bot check, instant 128-320kbps MP3 on cloud datacenters)
     last_error = ""
-    yt_search_queries = [
-        f"ytsearch5:{query}",
-        f"ytsearch5:{query} audio",
-    ]
-
-    for search_query in yt_search_queries:
-        candidates = []
-        try:
-            ydl_search_opts = {
-                "quiet": True,
-                "extract_flat": True,
-                "skip_download": True,
-                "socket_timeout": 15,
-            }
-            with yt_dlp.YoutubeDL(ydl_search_opts) as ydl_s:
-                search_info = ydl_s.extract_info(search_query, download=False)
-                candidates = (search_info.get("entries") or []) if search_info else []
-        except Exception as e_s:
-            logger.warning(f"Flat search for '{search_query}' failed: {e_s}")
-
-        if not candidates:
-            continue
-
-        for cand in candidates[:3]:
-            if not cand:
-                continue
-            dur = cand.get("duration") or 0
-            # Skip short snippets/teasers under 45s unless no other duration info
-            if 0 < dur < 45:
-                continue
-
-            vid = cand.get("id")
-            cand_url = cand.get("url") if (cand.get("url") and "http" in str(cand.get("url"))) else f"https://www.youtube.com/watch?v={vid}"
-
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts_base) as ydl_dl:
-                    info = ydl_dl.extract_info(cand_url, download=True)
-                    if not info:
-                        continue
-                    entry = info["entries"][0] if ("entries" in info and info["entries"]) else info
-                    return _process_downloaded_entry(entry, temp_dir)
-            except Exception as e_cand:
-                last_error = str(e_cand)
-                logger.warning(f"Candidate '{vid}' download failed ({e_cand}), probing next candidate...")
-                continue
-
-    # 4. Secondary Strategy: SoundCloud search fallback (strictly >50s, DRM-safe, fast)
     try:
         ydl_opts_sc = dict(ydl_opts_base)
         ydl_opts_sc["concurrent_fragment_downloads"] = 5
@@ -202,7 +155,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
                 "quiet": True,
                 "extract_flat": True,
                 "skip_download": True,
-                "socket_timeout": 15,
+                "socket_timeout": 10,
             }
             with yt_dlp.YoutubeDL(sc_search_opts) as ydl_sc_s:
                 sc_info = ydl_sc_s.extract_info(f"scsearch5:{query}", download=False)
@@ -226,7 +179,53 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
                     logger.debug(f"SoundCloud candidate failed: {e_sc_item}")
                     continue
     except Exception as e_sc:
-        logger.warning(f"SoundCloud fallback failed: {e_sc}")
+        last_error = str(e_sc)
+        logger.warning(f"SoundCloud search failed: {e_sc}")
+
+    # 4. Secondary Strategy: Fast YouTube Search (at most 2 candidates with tight 8s timeout to avoid cloud hanging)
+    yt_search_queries = [
+        f"ytsearch2:{query}",
+    ]
+
+    for search_query in yt_search_queries:
+        candidates = []
+        try:
+            ydl_search_opts = {
+                "quiet": True,
+                "extract_flat": True,
+                "skip_download": True,
+                "socket_timeout": 8,
+            }
+            with yt_dlp.YoutubeDL(ydl_search_opts) as ydl_s:
+                search_info = ydl_s.extract_info(search_query, download=False)
+                candidates = (search_info.get("entries") or []) if search_info else []
+        except Exception as e_s:
+            logger.warning(f"Flat search for '{search_query}' failed: {e_s}")
+
+        if not candidates:
+            continue
+
+        for cand in candidates[:2]:
+            if not cand:
+                continue
+            dur = cand.get("duration") or 0
+            if 0 < dur < 45:
+                continue
+
+            vid = cand.get("id")
+            cand_url = cand.get("url") if (cand.get("url") and "http" in str(cand.get("url"))) else f"https://www.youtube.com/watch?v={vid}"
+
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts_base) as ydl_dl:
+                    info = ydl_dl.extract_info(cand_url, download=True)
+                    if not info:
+                        continue
+                    entry = info["entries"][0] if ("entries" in info and info["entries"]) else info
+                    return _process_downloaded_entry(entry, temp_dir)
+            except Exception as e_cand:
+                last_error = str(e_cand)
+                logger.warning(f"Candidate '{vid}' download failed ({e_cand}), probing next candidate...")
+                continue
 
     # Clean up temp dir if all strategies failed
     try:
