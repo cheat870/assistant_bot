@@ -7,11 +7,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=7860 \
     HOME=/home/user
 
-# Install ffmpeg (required for audio/video processing) and curl
+# Install ffmpeg (required for audio/video processing), nodejs (YouTube JS solver) and curl
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
     ca-certificates \
+    nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up non-root user (UID 1000) required by Hugging Face Spaces

@@ -113,7 +113,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
 
     # Robust options with android client bypass & browser TLS impersonation for cloud datacenter checks
     ydl_opts_base = {
-        "format": "18/bestaudio/best",
+        "format": "18/best",
         "outtmpl": outtmpl,
         "noplaylist": True,
         "quiet": True,
@@ -123,7 +123,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         "retries": 2,
         "extractor_args": {
             "youtube": {
-                "player_client": ["android", "ios", "web"]
+                "player_client": ["android"]
             }
         },
         "postprocessors": postprocessors,
@@ -226,8 +226,9 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
                     "skip_download": True,
                     "socket_timeout": 10,
                 }
+                sc_query = re.sub(r'[^a-zA-Z0-9\u1780-\u17FF\s]+', ' ', query).strip() or query
                 with yt_dlp.YoutubeDL(sc_search_opts) as ydl_sc_s:
-                    sc_info = ydl_sc_s.extract_info(f"scsearch5:{query}", download=False)
+                    sc_info = ydl_sc_s.extract_info(f"scsearch5:{sc_query}", download=False)
                     sc_entries = (sc_info.get("entries") or []) if sc_info else []
 
                 for raw_entry in sc_entries:
@@ -416,10 +417,11 @@ async def _extract_song_via_ocr(image_bytes: bytes) -> Optional[str]:
 
         lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
         telegram_ui = [
-            '/song', '/music', 'telegram', ' am', ' pm',
+            '/song', '/music', 'song', 'music', 'telegram', ' am', ' pm',
             'ទាញយក', 'មិនអាច', 'រង់ចាំ', 'កំហុស', 'កំពុងផ្ញើ', 'សម្រេច',
             'subscribers', 'views', 'subscribe', 'comments', 'share',
-            'helloworld', 'ocr.space', 'demo key', 'ocr api', 'testing only'
+            'helloworld', 'ocr.space', 'demo key', 'ocr api', 'testing only',
+            'error', 'youtube', 'failed'
         ]
         candidates = []
         for l in lines:
@@ -428,10 +430,13 @@ async def _extract_song_via_ocr(image_bytes: bytes) -> Optional[str]:
             l_clean = re.sub(r'^ចម្រុះ\s*[-:]*\s*', '', l_clean)
             l_clean = re.sub(r'[\r\n\t]+', ' ', l_clean)
             l_clean = re.sub(r'\b\d+:\d+\b', '', l_clean)
+            l_clean = re.sub(r'[・·•|]', ' - ', l_clean)
             l_clean = re.sub(r'[^A-Za-z0-9\u1780-\u17FF\-\s\'\?]+', ' ', l_clean)
             l_clean = re.sub(r'\s+', ' ', l_clean).strip()
 
             l_lower = l_clean.lower()
+            if l_lower in ['song', 'music', 'songs', 'audio', 'none']:
+                continue
             if any(ui in l_lower for ui in telegram_ui):
                 continue
             if re.match(r'^\d+[\s:\d]*[ap]m?$', l_lower):
@@ -444,24 +449,30 @@ async def _extract_song_via_ocr(image_bytes: bytes) -> Optional[str]:
                 continue
             candidates.append(l_clean)
 
-        if not candidates:
+        cleaned = []
+        for c in candidates:
+            c_str = re.sub(r'^[-\s:?]+|[-\s:?]+$', '', c)
+            if c_str and c_str not in cleaned:
+                cleaned.append(c_str)
+
+        if not cleaned:
             return None
 
         # Priority 1: Candidate with dash (Artist - Title)
-        dash_candidates = [c for c in candidates if '-' in c and len(c.split()) >= 2]
+        dash_candidates = [c for c in cleaned if '-' in c and len(c.split()) >= 2]
         if dash_candidates:
-            cand = dash_candidates[-1].strip(' -')
+            cand = dash_candidates[0]
             cand_words = [w for w in cand.split() if w not in ['-', '?', ':']]
-            other_eng = [c for c in candidates if c != cand and re.search(r'[A-Za-z]{3,}', c)]
+            other_eng = [c for c in cleaned if c != cand and re.search(r'[A-Za-z]{3,}', c)]
             if len(cand_words) <= 2 and other_eng:
                 return f"{cand_words[0]} - {other_eng[0]}".strip(' -')
             return cand
 
-        # Priority 2: Combine top two candidates
-        if len(candidates) >= 2:
-            return f"{candidates[0]} - {candidates[1]}".strip(' -')
+        # Priority 2: Combine top two candidates (e.g. Artist on line 1, Title on line 2)
+        if len(cleaned) >= 2:
+            return f"{cleaned[0]} - {cleaned[1]}".strip(' -')
 
-        return candidates[-1].strip(' -')
+        return cleaned[0].strip(' -')
     except Exception as e_ocr:
         logger.warning(f"OCR song recognition failed: {e_ocr}")
     return None
