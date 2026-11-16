@@ -151,8 +151,11 @@ async def post_init(application: Application):
         BotCommand("status", "📊 ស្ថានភាពគណនី (My Status)"),
         BotCommand("help", "💡 ការណែនាំប្រើប្រាស់ (Help & Guide)"),
     ]
-    await application.bot.set_my_commands(commands)
-    logger.info("Bot commands successfully registered to Telegram native Menu.")
+    try:
+        await application.bot.set_my_commands(commands)
+        logger.info("Bot commands successfully registered to Telegram native Menu.")
+    except Exception as e_cmd:
+        logger.warning(f"Could not register Telegram native Menu commands: {e_cmd}")
 
 def main():
     """Main application launcher."""
@@ -331,8 +334,19 @@ def main():
     print("\n✅ Bot ដំណើរការរួចរាល់ហើយ! (Bot is running via polling...)")
     print("👉 ចូល Telegram រួចវាយពាក្យ /start ដើម្បីសាកល្បង។\n")
     
-    # Start Polling (preserve pending updates so messages sent during restart/sleep are not lost)
-    app.run_polling(drop_pending_updates=False)
+    # Start Polling with infinite bootstrap retries so temporary 502/network errors from Telegram never crash the container
+    import time
+    while True:
+        try:
+            app.run_polling(
+                drop_pending_updates=False,
+                bootstrap_retries=-1,
+                timeout=20,
+            )
+            break
+        except Exception as e_poll:
+            logger.warning(f"Polling loop encountered network glitch: {e_poll}. Retrying in 3 seconds...")
+            time.sleep(3)
 
 if __name__ == "__main__":
     main()
