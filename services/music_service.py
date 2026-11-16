@@ -20,6 +20,28 @@ def _get_ffmpeg_path() -> Optional[str]:
     except Exception:
         return None
 
+def is_query_relevant_match(query: str, title: str, uploader: str) -> bool:
+    """Check if the search result contains significant tokens from the query to avoid downloading unrelated tracks."""
+    tokens = [w.lower() for w in re.findall(r'[a-zA-Z0-9\u1780-\u17FF]+', query) if len(w) >= 2]
+    if not tokens:
+        return True
+    target = f"{title} {uploader}".lower()
+    matched = [t for t in tokens if t in target]
+    return len(matched) >= max(1, len(tokens) // 2)
+
+def is_cambodian_music_query(q: str) -> bool:
+    """Detect if query is likely a Cambodian / Khmer music track."""
+    if re.search(r'[\u1780-\u17FF]', q):
+        return True
+    q_lower = q.lower()
+    kh_artists = [
+        '4t5', 'vannda', 'vann da', 'g-devith', 'gdevith', 'ruthko', 'klap', 'baramey',
+        'tep piseth', 'teppiseth', 'meng pengly', 'tagmez', 'kmeng khmer', 'vuthea',
+        'sin sisamouth', 'ros sereysothea', 'pen ran', 'sinn sisamouth', 'chet khemrak',
+        'preap sovath', 'khem', 'khemrak sereymun', 'tony keo', 'chhorn sovannareach'
+    ]
+    return any(artist in q_lower for artist in kh_artists)
+
 def _clean_music_metadata(raw_title: str, raw_uploader: str) -> tuple[str, str]:
     """Clean up clutter from YouTube/SoundCloud titles and artist names."""
     title = raw_title or "Unknown Title"
@@ -145,50 +167,11 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"Direct URL download failed: {e}")
 
-    # 3. Primary Fast Strategy: SoundCloud Audio Search (Zero bot check, instant 128-320kbps MP3 on cloud datacenters)
+    is_khmer = is_cambodian_music_query(query)
     last_error = ""
-    try:
-        ydl_opts_sc = dict(ydl_opts_base)
-        ydl_opts_sc["concurrent_fragment_downloads"] = 5
-        with yt_dlp.YoutubeDL(ydl_opts_sc) as ydl:
-            sc_search_opts = {
-                "quiet": True,
-                "extract_flat": True,
-                "skip_download": True,
-                "socket_timeout": 10,
-            }
-            with yt_dlp.YoutubeDL(sc_search_opts) as ydl_sc_s:
-                sc_info = ydl_sc_s.extract_info(f"scsearch5:{query}", download=False)
-                sc_entries = (sc_info.get("entries") or []) if sc_info else []
 
-            for raw_entry in sc_entries:
-                if not raw_entry:
-                    continue
-                sc_url = raw_entry.get("url")
-                if not sc_url:
-                    continue
-                dur = raw_entry.get("duration") or 0
-                if 0 < dur <= 40 or dur > 660:
-                    continue
-                try:
-                    sc_dl = ydl.extract_info(sc_url, download=True)
-                    if sc_dl:
-                        entry = sc_dl["entries"][0] if ("entries" in sc_dl and sc_dl["entries"]) else sc_dl
-                        return _process_downloaded_entry(entry, temp_dir)
-                except Exception as e_sc_item:
-                    logger.debug(f"SoundCloud candidate failed: {e_sc_item}")
-                    continue
-    except Exception as e_sc:
-        last_error = str(e_sc)
-        logger.warning(f"SoundCloud search failed: {e_sc}")
-
-    # 4. Secondary Strategy: Fast YouTube Search (at most 2 candidates with tight 8s timeout to avoid cloud hanging)
-    yt_search_queries = [
-        f"ytsearch2:{query}",
-    ]
-
-    for search_query in yt_search_queries:
-        candidates = []
+    def _try_download_youtube():
+        nonlocal last_error
         try:
             ydl_search_opts = {
                 "quiet": True,
@@ -197,35 +180,84 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
                 "socket_timeout": 8,
             }
             with yt_dlp.YoutubeDL(ydl_search_opts) as ydl_s:
-                search_info = ydl_s.extract_info(search_query, download=False)
+                search_info = ydl_s.extract_info(f"ytsearch3:{query}", download=False)
                 candidates = (search_info.get("entries") or []) if search_info else []
-        except Exception as e_s:
-            logger.warning(f"Flat search for '{search_query}' failed: {e_s}")
 
-        if not candidates:
-            continue
+            for cand in candidates[:2]:
+                if not cand:
+                    continue
+                dur = cand.get("duration") or 0
+                if 0 < dur <= 40 or dur > 660:
+                    continue
+                cand_title = cand.get("title") or ""
+                cand_uploader = cand.get("uploader") or ""
+                if not is_query_relevant_match(query, cand_title, cand_uploader):
+                    continue
 
-        for cand in candidates[:2]:
-            if not cand:
-                continue
-            dur = cand.get("duration") or 0
-            if 0 < dur <= 40 or dur > 660:
-                continue
+                vid = cand.get("id")
+                cand_url = cand.get("url") if (cand.get("url") and "http" in str(cand.get("url"))) else f"https://www.youtube.com/watch?v={vid}"
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts_base) as ydl_dl:
+                        info = ydl_dl.extract_info(cand_url, download=True)
+                        if info:
+                            entry = info["entries"][0] if ("entries" in info and info["entries"]) else info
+                            return _process_downloaded_entry(entry, temp_dir)
+                except Exception as e_cand:
+                    last_error = str(e_cand)
+                    continue
+        except Exception as e_yt:
+            last_error = str(e_yt)
+        return None
 
-            vid = cand.get("id")
-            cand_url = cand.get("url") if (cand.get("url") and "http" in str(cand.get("url"))) else f"https://www.youtube.com/watch?v={vid}"
+    def _try_download_soundcloud():
+        nonlocal last_error
+        try:
+            ydl_opts_sc = dict(ydl_opts_base)
+            ydl_opts_sc["concurrent_fragment_downloads"] = 5
+            with yt_dlp.YoutubeDL(ydl_opts_sc) as ydl:
+                sc_search_opts = {
+                    "quiet": True,
+                    "extract_flat": True,
+                    "skip_download": True,
+                    "socket_timeout": 10,
+                }
+                with yt_dlp.YoutubeDL(sc_search_opts) as ydl_sc_s:
+                    sc_info = ydl_sc_s.extract_info(f"scsearch5:{query}", download=False)
+                    sc_entries = (sc_info.get("entries") or []) if sc_info else []
 
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts_base) as ydl_dl:
-                    info = ydl_dl.extract_info(cand_url, download=True)
-                    if not info:
+                for raw_entry in sc_entries:
+                    if not raw_entry:
                         continue
-                    entry = info["entries"][0] if ("entries" in info and info["entries"]) else info
-                    return _process_downloaded_entry(entry, temp_dir)
-            except Exception as e_cand:
-                last_error = str(e_cand)
-                logger.warning(f"Candidate '{vid}' download failed ({e_cand}), probing next candidate...")
-                continue
+                    sc_url = raw_entry.get("url")
+                    if not sc_url:
+                        continue
+                    dur = raw_entry.get("duration") or 0
+                    if 0 < dur <= 40 or dur > 660:
+                        continue
+                    sc_title = raw_entry.get("title") or ""
+                    sc_uploader = raw_entry.get("uploader") or ""
+                    if not is_query_relevant_match(query, sc_title, sc_uploader):
+                        continue
+                    try:
+                        sc_dl = ydl.extract_info(sc_url, download=True)
+                        if sc_dl:
+                            entry = sc_dl["entries"][0] if ("entries" in sc_dl and sc_dl["entries"]) else sc_dl
+                            return _process_downloaded_entry(entry, temp_dir)
+                    except Exception as e_sc_item:
+                        logger.debug(f"SoundCloud candidate failed: {e_sc_item}")
+                        continue
+        except Exception as e_sc:
+            last_error = str(e_sc)
+        return None
+
+    # Priority Order:
+    # If Cambodian song -> YouTube first (100% catalog coverage), then SoundCloud fallback
+    # If Western/International song -> SoundCloud first (instant 128k audio), then YouTube fallback
+    strategies = [_try_download_youtube, _try_download_soundcloud] if is_khmer else [_try_download_soundcloud, _try_download_youtube]
+    for strat in strategies:
+        result = strat()
+        if result:
+            return result
 
     # Clean up temp dir if all strategies failed
     try:
