@@ -248,3 +248,52 @@ async def archive_video_to_channel(
             "channel_id": channel_target,
             "error": str(e)
         }
+
+async def archive_photos_to_channel(
+    bot,
+    user,
+    photo_data: Dict[str, Any],
+    sent_photo_file_ids: list
+) -> Optional[Dict[str, Any]]:
+    """
+    Instantly archive downloaded Photo Slideshow / Live Photos into the storage channel (@Song182).
+    Uses Telegram's cached photo file_ids for instant zero-bandwidth posting.
+    """
+    channel_target = get_music_channel() or "-1003994142170"
+    if not channel_target or not sent_photo_file_ids:
+        return None
+
+    try:
+        from telegram import InputMediaPhoto
+        title = photo_data.get("title", "TikTok Photos")
+        uploader = photo_data.get("uploader", "TikTok Creator")
+
+        # Build clean user credit
+        if user and getattr(user, "username", None):
+            user_credit = f"@{user.username}"
+        elif user and getattr(user, "first_name", None):
+            user_credit = user.first_name
+        else:
+            user_credit = "អ្នកប្រើប្រាស់ (User)"
+
+        bot_username = getattr(bot, "username", "Researchmap_bot") or "Researchmap_bot"
+
+        caption = (
+            f"📸 <b>{html.escape(title[:120])}</b>\n"
+            f"🖼️ <b>ចំនួនរូបថត (HD Photos):</b> {len(sent_photo_file_ids)} សន្លឹក\n"
+            f"👤 <b>អ្នកបង្កើត (Creator):</b> {html.escape(uploader[:50])}\n"
+            f"🔎 <b>សំណើដោយ (Requested by):</b> {html.escape(user_credit)}\n\n"
+            f"✨ <b>ទាញយករូបថត &amp; ចម្រៀងឥតគិតថ្លៃ:</b> @{html.escape(bot_username)}\n"
+            f"🎵 <b>Smart Assistant Media Hub</b>"
+        )
+
+        media = []
+        for i, fid in enumerate(sent_photo_file_ids[:10]):
+            cap = caption if i == 0 else None
+            media.append(InputMediaPhoto(media=fid, caption=cap, parse_mode="HTML"))
+
+        await bot.send_media_group(chat_id=channel_target, media=media)
+        return {"success": True, "channel_id": channel_target}
+    except Exception as e:
+        logger.warning(f"Could not archive photos to channel {channel_target}: {e}")
+        return {"success": False, "channel_id": channel_target, "error": str(e)}

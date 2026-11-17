@@ -253,6 +253,90 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception:
             await update.message.reply_text(err_text, parse_mode="Markdown")
         return
+
+    # Handle TikTok Photo Slideshow / Live Photos mode
+    if result.is_photo_slideshow and result.images:
+        try:
+            await status_msg.edit_text(
+                f"📸 *បានរកឃើញ Photo Slideshow / Live Photos!* កំពុង Upload រូបភាព HD ទាំង *{len(result.images)} សន្លឹក* ទៅ Telegram...\n"
+                f"🖼️ ចំណងជើង: *{result.title[:60]}*\n"
+                f"👤 អ្នកបង្កើត: *{result.uploader}*\n\n"
+                f"សូមរង់ចាំបន្តិចណា៎! 🚀",
+                parse_mode="Markdown"
+            )
+        except Exception:
+            pass
+
+        await chat.send_action("upload_photo")
+        from telegram import InputMediaPhoto
+
+        photo_caption = (
+            f"📸 *{result.title}*\n"
+            f"🖼️ ចំនួនរូបថត: *{len(result.images)} សន្លឹក (HD)*\n"
+            f"👤 អ្នកបង្កើត: {result.uploader}\n\n"
+            f"✨ ទាញយកដោយ Smart Assistant Bot 🚀"
+        )
+
+        all_sent_photo_ids = []
+        try:
+            chunks = [result.images[i:i + 10] for i in range(0, len(result.images), 10)]
+            for c_idx, chunk in enumerate(chunks):
+                media = []
+                for i, img_path in enumerate(chunk):
+                    with open(img_path, "rb") as f_img:
+                        img_bytes = f_img.read()
+                    cap = photo_caption if c_idx == 0 and i == 0 else None
+                    media.append(InputMediaPhoto(media=img_bytes, caption=cap, parse_mode="Markdown"))
+
+                sent_group = await update.message.reply_media_group(media=media)
+                for sm in sent_group:
+                    if sm.photo:
+                        all_sent_photo_ids.append(sm.photo[-1].file_id)
+
+            log_download(chat.id, url, result.title)
+
+            # Control buttons for music and channel
+            photo_buttons = [
+                [InlineKeyboardButton("🎵 ទាញយកបទចម្រៀង (BGM MP3)", callback_data=f"dlmp3_{token}")],
+                [InlineKeyboardButton("📻 មើលក្នុង Channel @Song182", url="https://t.me/Song182")]
+            ]
+            await update.message.reply_text(
+                f"✅ *បានផ្ញើរូបថតកម្រិតច្បាស់ HD ទាំងអស់ ({len(result.images)} សន្លឹក) រួចរាល់!* 🖼️\n"
+                f"👉 អ្នកអាចចុចប៊ូតុងខាងក្រោមដើម្បីទាញយកបទចម្រៀង BGM នៃរូបភាពនេះបាន 👇",
+                reply_markup=InlineKeyboardMarkup(photo_buttons),
+                parse_mode="Markdown"
+            )
+
+            # Auto-archive photos to @Song182
+            if all_sent_photo_ids:
+                try:
+                    from services.music_archive_service import archive_photos_to_channel
+                    asyncio.create_task(
+                        archive_photos_to_channel(
+                            bot=context.bot,
+                            user=update.effective_user,
+                            photo_data={
+                                "title": result.title,
+                                "uploader": result.uploader,
+                                "url": url,
+                            },
+                            sent_photo_file_ids=all_sent_photo_ids
+                        )
+                    )
+                except Exception as e_p_arch:
+                    logger.warning(f"Could not auto-archive photos: {e_p_arch}")
+
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+        except Exception as e_p_send:
+            logger.error(f"Failed to send photo slideshow: {e_p_send}")
+            await update.message.reply_text(f"❌ *កំហុសក្នុងការផ្ញើរូបភាព៖* {str(e_p_send)[:150]}")
+        finally:
+            for p in result.images:
+                cleanup_file(p)
+        return
         
     # Build buttons for MP3, HD Cover, 1080p, 4K, and direct web link
     buttons = [

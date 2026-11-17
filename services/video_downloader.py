@@ -45,7 +45,10 @@ class VideoDownloadResult:
         file_size_mb: float = 0.0,
         direct_web_url: Optional[str] = None,
         is_audio: bool = False,
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
+        images: Optional[List[str]] = None,
+        is_photo_slideshow: bool = False,
+        music_url: Optional[str] = None
     ):
         self.success = success
         self.file_path = file_path
@@ -57,6 +60,9 @@ class VideoDownloadResult:
         self.direct_web_url = direct_web_url
         self.is_audio = is_audio
         self.error_message = error_message
+        self.images = images or []
+        self.is_photo_slideshow = is_photo_slideshow
+        self.music_url = music_url
 
 def _download_tiktok_api(url: str, download_folder: Path, audio_only: bool = False) -> VideoDownloadResult:
     """High-speed watermark-free TikTok downloader via dedicated API."""
@@ -75,7 +81,43 @@ def _download_tiktok_api(url: str, download_folder: Path, audio_only: bool = Fal
                 return VideoDownloadResult(success=False, error_message=f"TikTok Error: {err_msg}")
             
             video_info = data.get('data', {})
-            
+            images_list = video_info.get('images') or []
+
+            # Handle TikTok Photo Slideshow / Live Photos mode
+            if images_list and not audio_only:
+                saved_images = []
+                total_bytes = 0
+                unique_id = str(uuid.uuid4())[:8]
+                title = video_info.get('title') or "TikTok Photos"
+                author = video_info.get('author', {}).get('nickname') or "TikTok Creator"
+                music_url = video_info.get('music') or video_info.get('play')
+
+                for idx, img_u in enumerate(images_list[:20]):
+                    try:
+                        img_resp = client.get(img_u, headers=headers, follow_redirects=True)
+                        if img_resp.status_code == 200:
+                            img_path = download_folder / f"tiktok_img_{unique_id}_{idx+1}.jpg"
+                            img_path.write_bytes(img_resp.content)
+                            saved_images.append(str(img_path))
+                            total_bytes += len(img_resp.content)
+                    except Exception:
+                        continue
+
+                if saved_images:
+                    file_size_mb = round(total_bytes / (1024 * 1024), 2)
+                    return VideoDownloadResult(
+                        success=True,
+                        file_path=saved_images[0],
+                        title=title,
+                        uploader=author,
+                        file_size_mb=file_size_mb,
+                        thumbnail_url=saved_images[0],
+                        is_audio=False,
+                        images=saved_images,
+                        is_photo_slideshow=True,
+                        music_url=music_url
+                    )
+
             if audio_only:
                 media_url = video_info.get('music') or video_info.get('play')
                 ext = "mp3"
