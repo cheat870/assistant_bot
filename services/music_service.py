@@ -21,17 +21,43 @@ def _get_ffmpeg_path() -> Optional[str]:
         return None
 
 def is_query_relevant_match(query: str, title: str, uploader: str) -> bool:
-    """Check if the search result contains significant tokens from the query to avoid downloading unrelated tracks."""
+    """
+    Strictly check if search result contains significant tokens from query to avoid downloading unrelated tracks.
+    If query contains a hyphen '-' or colon ':', BOTH parts (artist & title) must have matching tokens.
+    """
+    clean_title = (title or "").lower()
+    clean_uploader = (uploader or "").lower()
+    target = f"{clean_title} {clean_uploader}".replace('.', '').replace('-', '').replace(' ', '')
+    raw_target = f"{clean_title} {clean_uploader}"
+
+    delim = '-' if '-' in query else (':' if ':' in query else None)
+    if delim:
+        parts = query.split(delim, 1)
+        part1 = parts[0].strip()
+        part2 = parts[1].strip()
+
+        p1_tokens = [w.lower() for w in re.findall(r'[a-zA-Z0-9\u1780-\u17FF]+', part1) if len(w) >= 2]
+        p1_single = ''.join(re.findall(r'\b[a-zA-Z]\b', part1)).lower()
+        if len(p1_single) >= 2 and p1_single not in p1_tokens:
+            p1_tokens.append(p1_single)
+
+        p2_tokens = [w.lower() for w in re.findall(r'[a-zA-Z0-9\u1780-\u17FF]+', part2) if len(w) >= 2]
+        p2_single = ''.join(re.findall(r'\b[a-zA-Z]\b', part2)).lower()
+        if len(p2_single) >= 2 and p2_single not in p2_tokens:
+            p2_tokens.append(p2_single)
+
+        p1_ok = not p1_tokens or any(t in target or t in raw_target for t in p1_tokens)
+        p2_ok = not p2_tokens or any(t in target or t in raw_target for t in p2_tokens)
+        return p1_ok and p2_ok
+
     tokens = [w.lower() for w in re.findall(r'[a-zA-Z0-9\u1780-\u17FF]+', query) if len(w) >= 2]
-    single_letters = ''.join(re.findall(r'\b[a-zA-Z]\b', query)).lower()
-    if len(single_letters) >= 2 and single_letters not in tokens:
-        tokens.append(single_letters)
+    single = ''.join(re.findall(r'\b[a-zA-Z]\b', query)).lower()
+    if len(single) >= 2 and single not in tokens:
+        tokens.append(single)
     if not tokens:
         return True
-    target = f"{title} {uploader}".lower().replace('.', '').replace('-', '').replace(' ', '')
-    raw_target = f"{title} {uploader}".lower()
     matched = [t for t in tokens if t in target or t in raw_target]
-    return len(matched) >= max(1, len(tokens) // 2)
+    return len(matched) >= max(1, (len(tokens) + 1) // 2)
 
 def is_cambodian_music_query(q: str) -> bool:
     """Detect if query is likely a Cambodian / Khmer music track."""
@@ -177,17 +203,32 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
     def _try_download_youtube():
         nonlocal last_error
         try:
-            ydl_search_opts = {
-                "quiet": True,
-                "extract_flat": True,
-                "skip_download": True,
-                "socket_timeout": 8,
-            }
-            with yt_dlp.YoutubeDL(ydl_search_opts) as ydl_s:
-                search_info = ydl_s.extract_info(f"ytsearch3:{query}", download=False)
-                candidates = (search_info.get("entries") or []) if search_info else []
+            ydl_search_opts = dict(ydl_opts_base)
+            ydl_search_opts["extract_flat"] = True
+            ydl_search_opts["skip_download"] = True
+            ydl_search_opts["socket_timeout"] = 15
+            ydl_search_opts["retries"] = 3
+            ydl_search_opts["postprocessors"] = []
 
-            for cand in candidates[:2]:
+            search_queries = [f"ytsearch5:{query}"]
+            clean_q = re.sub(r'[^a-zA-Z0-9\u1780-\u17FF\s]+', ' ', query).strip()
+            if clean_q and clean_q != query:
+                search_queries.append(f"ytsearch5:{clean_q}")
+
+            candidates = []
+            with yt_dlp.YoutubeDL(ydl_search_opts) as ydl_s:
+                for sq in search_queries:
+                    try:
+                        search_info = ydl_s.extract_info(sq, download=False)
+                        entries = (search_info.get("entries") or []) if search_info else []
+                        if entries:
+                            candidates = entries
+                            break
+                    except Exception as e_sq:
+                        last_error = str(e_sq)
+                        continue
+
+            for cand in candidates:
                 if not cand:
                     continue
                 dur = cand.get("duration") or 0
