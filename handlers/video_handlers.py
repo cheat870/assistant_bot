@@ -254,8 +254,12 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text(err_text, parse_mode="Markdown")
         return
         
-    # Build buttons for MP3, HD Cover, and direct web link
+    # Build buttons for MP3, HD Cover, 1080p, 4K, and direct web link
     buttons = [
+        [
+            InlineKeyboardButton("💎 1080p FHD", callback_data=f"dlqual_{token}_1080p"),
+            InlineKeyboardButton("🔥 4K / Best", callback_data=f"dlqual_{token}_4k"),
+        ],
         [
             InlineKeyboardButton("🎵 ទាញយកជា MP3", callback_data=f"dlmp3_{token}"),
             InlineKeyboardButton("🖼️ រូប Cover HD", callback_data=f"dlthumb_{token}"),
@@ -437,6 +441,84 @@ async def handle_media_download_callback(update: Update, context: ContextTypes.D
             await chat.send_message(f"❌ កំហុសក្នុងការផ្ញើរូបភាព៖ {str(e)[:100]}")
         finally:
             cleanup_file(thumb_path)
+        return True
+
+    elif data.startswith("dlqual_"):
+        parts = data.split("_")
+        token = parts[1] if len(parts) > 1 else ""
+        qual = parts[2] if len(parts) > 2 else "1080p"
+        url = URL_TOKEN_CACHE.get(token)
+        if not url:
+            await query.answer("❌ Link បានផុតកំណត់ហើយ សូមផ្ញើ Link ម្តងទៀត។", show_alert=True)
+            return True
+
+        await query.answer(f"⏳ កំពុងដំណើរការទាញយកកម្រិត {qual.upper()}...")
+        status_m = await chat.send_message(
+            f"⏳ *កំពុងទាញយកវីដេអូកម្រិតច្បាស់ {qual.upper()} (Ultra HD)...*\n"
+            f"សូមរង់ចាំបន្តិចណា៎! 🚀",
+            parse_mode="Markdown"
+        )
+        await chat.send_action("upload_video")
+
+        res = await download_video_async(url, quality=qual)
+        if not res.success or not res.file_path:
+            await status_m.edit_text(
+                f"❌ មិនអាចទាញយកកម្រិត {qual.upper()} បានទេ៖ {res.error_message}\n_ប្រភពដើមប្រហែលជាគ្មានកម្រិត {qual.upper()} ឡើយ។_",
+                parse_mode="Markdown"
+            )
+            return True
+
+        try:
+            caption = (
+                f"🎬 *{res.title}* ({qual.upper()})\n"
+                f"👤 អ្នកបង្កើត: {res.uploader}\n"
+                f"📦 ទំហំ: {res.file_size_mb} MB (កម្រិតច្បាស់ខ្ពស់)\n\n"
+                f"✨ ទាញយកដោយ Smart Assistant Bot 🚀"
+            )
+            sent_v = None
+            with open(res.file_path, "rb") as video_file:
+                sent_v = await chat.send_video(
+                    video=video_file,
+                    caption=caption,
+                    duration=res.duration,
+                    supports_streaming=True,
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("📻 មើលក្នុង Channel @Song182", url="https://t.me/Song182")]
+                    ]),
+                    parse_mode="Markdown",
+                    read_timeout=900.0,
+                    write_timeout=900.0,
+                )
+
+            # Auto-archive HD video to channel @Song182
+            if sent_v and sent_v.video:
+                try:
+                    from services.music_archive_service import archive_video_to_channel
+                    asyncio.create_task(
+                        archive_video_to_channel(
+                            bot=context.bot,
+                            user=update.effective_user,
+                            video_data={
+                                "title": f"{res.title} ({qual.upper()})",
+                                "uploader": res.uploader,
+                                "duration": res.duration,
+                                "url": url,
+                            },
+                            sent_video_file_id=sent_v.video.file_id
+                        )
+                    )
+                except Exception as e_arch_hd:
+                    logger.warning(f"Could not auto-archive HD video to channel: {e_arch_hd}")
+
+            try:
+                await status_m.delete()
+            except Exception:
+                pass
+        except Exception as e:
+            logger.error(f"Error sending HD video: {e}")
+            await chat.send_message(f"❌ កំហុសក្នុងការផ្ញើវីដេអូ៖ {str(e)[:100]}")
+        finally:
+            cleanup_file(res.file_path)
         return True
         
     return False

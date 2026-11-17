@@ -65,7 +65,7 @@ def _download_tiktok_api(url: str, download_folder: Path, audio_only: bool = Fal
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         }
         with httpx.Client(timeout=30) as client:
-            resp = client.post('https://www.tikwm.com/api/', data={'url': url})
+            resp = client.post('https://www.tikwm.com/api/', data={'url': url, 'hd': 1})
             if resp.status_code != 200:
                 return VideoDownloadResult(success=False, error_message="Failed to contact TikTok API service.")
             
@@ -80,6 +80,7 @@ def _download_tiktok_api(url: str, download_folder: Path, audio_only: bool = Fal
                 media_url = video_info.get('music') or video_info.get('play')
                 ext = "mp3"
             else:
+                # Prefer 1080p Full HD (hdplay) -> standard play -> wmplay
                 media_url = video_info.get('hdplay') or video_info.get('play') or video_info.get('wmplay')
                 ext = "mp4"
 
@@ -141,17 +142,19 @@ def _sync_download(url: str, download_folder: Path, quality: str = "best", audio
     unique_id = str(uuid.uuid4())[:8]
     output_template = str(download_folder / f"media_{unique_id}_%(id)s.%(ext)s")
     
-    # Configure quality format
+    # Configure quality format (prioritize 4K / 1080p within Telegram's 50MB bot upload limit)
     if audio_only:
         fmt = 'bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best'
+    elif quality == "4k":
+        fmt = 'bestvideo[height<=2160][filesize<48M]+bestaudio/best[height<=2160][filesize<48M]/bestvideo[height<=1440][filesize<48M]+bestaudio/best'
     elif quality == "1080p":
-        fmt = 'bestvideo[height<=1080][filesize<48M]+bestaudio/best[height<=1080][filesize<48M]/best[height<=1080]/best'
+        fmt = 'bestvideo[height<=1080][filesize<48M]+bestaudio/best[height<=1080][filesize<48M]/bestvideo+bestaudio/best'
     elif quality == "720p":
         fmt = 'bestvideo[height<=720][filesize<48M]+bestaudio/best[height<=720][filesize<48M]/best[height<=720]/best'
     elif quality == "480p":
         fmt = 'bestvideo[height<=480][filesize<48M]+bestaudio/best[height<=480][filesize<48M]/best[height<=480]/best'
     else:
-        fmt = 'best[filesize<48M]/bestvideo[filesize<40M]+bestaudio/best[ext=mp4]/best'
+        fmt = 'bestvideo[height<=2160][filesize<48M]+bestaudio/bestvideo[height<=1080][filesize<48M]+bestaudio/best[height<=1080]/best'
 
     ydl_opts: Dict[str, Any] = {
         'format': fmt,
@@ -159,8 +162,16 @@ def _sync_download(url: str, download_folder: Path, quality: str = "best", audio
         'noplaylist': True,
         'quiet': True,
         'no_warnings': True,
+        'source_address': '0.0.0.0',
         'socket_timeout': 30,
         'max_filesize': MAX_FILE_SIZE_MB * 1024 * 1024,
+        'js_runtimes': {'node': {}},
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['tv', 'web_embedded', 'android'],
+                'player_skip': ['webpage']
+            }
+        },
     }
     
     if not audio_only:
