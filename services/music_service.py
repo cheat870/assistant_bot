@@ -137,7 +137,7 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
     is_url = query.startswith("http://") or query.startswith("https://")
     is_sc_url = is_url and "soundcloud.com" in query.lower()
 
-    # Robust options with android client bypass & browser TLS impersonation for cloud datacenter checks
+    # Robust options with tv/web_embedded/android fallback, IPv4 enforcement & node JS solver
     ydl_opts_base = {
         "format": "18/best",
         "outtmpl": outtmpl,
@@ -145,11 +145,14 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         "quiet": True,
         "no_warnings": True,
         "ignoreerrors": False,
+        "source_address": "0.0.0.0",
         "socket_timeout": 15,
-        "retries": 2,
+        "retries": 3,
+        "js_runtimes": {"node": {}},
         "extractor_args": {
             "youtube": {
-                "player_client": ["android"]
+                "player_client": ["tv", "web_embedded", "android"],
+                "player_skip": ["webpage"]
             }
         },
         "postprocessors": postprocessors,
