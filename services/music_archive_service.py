@@ -16,9 +16,13 @@ async def verify_channel_access(bot, channel_target: str) -> Tuple[bool, str, Op
 
     target = channel_target.strip()
     try:
+        bot_id = int(bot.token.split(":")[0]) if hasattr(bot, "token") and bot.token else (bot.id if hasattr(bot, "id") else None)
+        if not bot_id and hasattr(bot, "get_me"):
+            me = await bot.get_me()
+            bot_id = me.id
         chat = await bot.get_chat(target)
         try:
-            bot_member = await bot.get_chat_member(chat.id, bot.id)
+            bot_member = await bot.get_chat_member(chat.id, bot_id)
             is_admin = bot_member.status in ["administrator", "creator"]
             can_post = getattr(bot_member, "can_post_messages", None)
             if can_post is None:
@@ -139,6 +143,106 @@ async def archive_song_to_channel(
 
     except Exception as e:
         logger.warning(f"Could not archive song to channel {channel_target}: {e}")
+        return {
+            "success": False,
+            "channel_id": channel_target,
+            "error": str(e)
+        }
+
+async def archive_video_to_channel(
+    bot,
+    user,
+    video_data: Dict[str, Any],
+    sent_video_file_id: str
+) -> Optional[Dict[str, Any]]:
+    """
+    Instantly archive the downloaded video into the configured storage channel (@Song182).
+    Uses Telegram's cached video file_id for 0.1-second instantaneous zero-bandwidth posting.
+    """
+    channel_target = get_music_channel() or "-1003994142170"
+    if not channel_target:
+        return None
+
+    try:
+        title = video_data.get("title", "Unknown Title")
+        uploader = video_data.get("uploader", "Unknown Creator")
+        duration = video_data.get("duration", 0)
+        dur_sec = int(duration) if duration else 0
+        dur_str = f"{dur_sec // 60}:{dur_sec % 60:02d}" if dur_sec else ""
+        url = video_data.get("url", "")
+
+        # Build clean user credit
+        if user and getattr(user, "username", None):
+            user_credit = f"@{user.username}"
+        elif user and getattr(user, "first_name", None):
+            user_credit = user.first_name
+        else:
+            user_credit = "អ្នកប្រើប្រាស់ (User)"
+
+        bot_username = getattr(bot, "username", "Researchmap_bot") or "Researchmap_bot"
+
+        dur_line = f"⏱️ <b>រយៈពេល (Duration):</b> {dur_str}\n" if dur_str else ""
+        channel_caption = (
+            f"🎬 <b>{html.escape(title[:120])}</b>\n"
+            f"👤 <b>អ្នកបង្កើត (Creator):</b> {html.escape(uploader[:50])}\n"
+            f"{dur_line}"
+            f"🔎 <b>សំណើដោយ (Requested by):</b> {html.escape(user_credit)}\n\n"
+            f"✨ <b>ទាញយកវីដេអូ &amp; ចម្រៀងឥតគិតថ្លៃ:</b> @{html.escape(bot_username)}\n"
+            f"🎵 <b>Smart Assistant Media Hub</b>"
+        )
+
+        channel_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎬 ទាញយកវីដេអូ / ចម្រៀង", url=f"https://t.me/{bot_username}?start=dl")]
+        ])
+
+        try:
+            channel_msg = await bot.send_video(
+                chat_id=channel_target,
+                video=sent_video_file_id,
+                caption=channel_caption,
+                parse_mode="HTML",
+                supports_streaming=True,
+                reply_markup=channel_markup
+            )
+        except Exception as e_html:
+            logger.warning(f"HTML send_video to channel failed, retrying plain text: {e_html}")
+            channel_msg = await bot.send_video(
+                chat_id=channel_target,
+                video=sent_video_file_id,
+                caption=f"🎬 {title[:120]}\n👤 {uploader[:50]}\n🔎 {user_credit}\n\n✨ @{bot_username}",
+                supports_streaming=True,
+                reply_markup=channel_markup
+            )
+
+        chat_obj = channel_msg.chat
+        post_url = None
+        if chat_obj and chat_obj.username:
+            post_url = f"https://t.me/{chat_obj.username}/{channel_msg.message_id}"
+        elif channel_target.startswith("@"):
+            post_url = f"https://t.me/{channel_target.lstrip('@')}/{channel_msg.message_id}"
+
+        # Record in SQLite archive log
+        user_id = getattr(user, "id", 0) if user else 0
+        log_music_archive(
+            chat_id=user_id,
+            query=url or title,
+            title=title,
+            performer=uploader,
+            duration=dur_sec,
+            file_id=sent_video_file_id,
+            channel_id=channel_target,
+            channel_message_id=channel_msg.message_id
+        )
+
+        return {
+            "success": True,
+            "channel_id": channel_target,
+            "channel_title": chat_obj.title if chat_obj else channel_target,
+            "message_id": channel_msg.message_id,
+            "post_url": post_url
+        }
+    except Exception as e:
+        logger.warning(f"Could not archive video to channel {channel_target}: {e}")
         return {
             "success": False,
             "channel_id": channel_target,

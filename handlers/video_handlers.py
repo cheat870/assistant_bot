@@ -259,6 +259,9 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
         [
             InlineKeyboardButton("🎵 ទាញយកជា MP3", callback_data=f"dlmp3_{token}"),
             InlineKeyboardButton("🖼️ រូប Cover HD", callback_data=f"dlthumb_{token}"),
+        ],
+        [
+            InlineKeyboardButton("📻 មើលក្នុង Channel @Song182", url="https://t.me/Song182")
         ]
     ]
     if result.direct_web_url:
@@ -289,8 +292,9 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
             f"✨ ទាញយកដោយ Smart Assistant Bot 🚀"
         )
         
+        sent_video = None
         with open(result.file_path, "rb") as video_file:
-            await update.message.reply_video(
+            sent_video = await update.message.reply_video(
                 video=video_file,
                 caption=caption,
                 duration=result.duration,
@@ -302,6 +306,26 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
             )
             
         log_download(chat.id, url, result.title)
+
+        # Automatic Channel Archiving to @Song182 (-1003994142170)
+        if sent_video and sent_video.video:
+            try:
+                from services.music_archive_service import archive_video_to_channel
+                asyncio.create_task(
+                    archive_video_to_channel(
+                        bot=context.bot,
+                        user=update.effective_user,
+                        video_data={
+                            "title": result.title,
+                            "uploader": result.uploader,
+                            "duration": result.duration,
+                            "url": url,
+                        },
+                        sent_video_file_id=sent_video.video.file_id
+                    )
+                )
+            except Exception as e_arch:
+                logger.warning(f"Could not auto-archive video to channel: {e_arch}")
         
         try:
             await status_msg.delete()
@@ -344,16 +368,42 @@ async def handle_media_download_callback(update: Update, context: ContextTypes.D
             return True
             
         try:
+            sent_audio = None
             with open(res.file_path, "rb") as audio_file:
-                await chat.send_audio(
+                sent_audio = await chat.send_audio(
                     audio=audio_file,
                     title=res.title,
                     performer=res.uploader,
                     duration=res.duration,
                     caption=f"🎵 *{res.title}*\n📦 ទំហំ៖ {res.file_size_mb} MB\n✨ Smart Assistant Bot",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("📻 ស្តាប់ក្នុង Music Channel", url="https://t.me/Song182")]
+                    ]),
                     parse_mode="Markdown",
                     read_timeout=600.0,
                 )
+
+            # Auto-archive MP3 to channel @Song182
+            if sent_audio and sent_audio.audio:
+                try:
+                    from services.music_archive_service import archive_song_to_channel
+                    dur_sec = res.duration or 0
+                    asyncio.create_task(
+                        archive_song_to_channel(
+                            bot=context.bot,
+                            user=update.effective_user,
+                            song_data={
+                                "title": res.title,
+                                "performer": res.uploader,
+                                "duration": dur_sec,
+                                "duration_str": f"{dur_sec // 60}:{dur_sec % 60:02d}" if dur_sec else "Unknown",
+                                "query": url or res.title,
+                            },
+                            sent_audio_file_id=sent_audio.audio.file_id
+                        )
+                    )
+                except Exception as e_arch_mp3:
+                    logger.warning(f"Could not auto-archive MP3 audio: {e_arch_mp3}")
         except Exception as e:
             logger.error(f"Error sending audio: {e}")
             await chat.send_message(f"❌ កំហុសក្នុងការផ្ញើសំឡេង៖ {str(e)[:100]}")
