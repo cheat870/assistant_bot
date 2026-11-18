@@ -100,7 +100,7 @@ from handlers.command_handlers import (
     clearsongchannel_command,
     button_callback_handler,
 )
-from handlers.video_handlers import handle_video_message
+from handlers.video_handlers import handle_video_message, handle_media_download_callback
 
 # Configure logging
 logging.basicConfig(
@@ -310,7 +310,8 @@ def main():
     app.add_handler(CommandHandler("post", content_command, block=False))
     app.add_handler(CommandHandler("script", content_command, block=False))
     
-    # Register Callback Query Handler for Buttons
+    # Register Callback Query Handlers for Media Downloads & Buttons
+    app.add_handler(CallbackQueryHandler(handle_media_download_callback, pattern="^(dlmp3_|dlthumb_|dlqual_)", block=False))
     app.add_handler(CallbackQueryHandler(button_callback_handler, block=False))
 
     # Register Location Handler for GPS Location Sharing

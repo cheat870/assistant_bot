@@ -2,7 +2,7 @@ import os
 import uuid
 import asyncio
 import logging
-from typing import Dict
+from typing import Dict, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
@@ -13,7 +13,13 @@ from services.video_downloader import (
     download_thumbnail_hd,
     cleanup_file,
 )
-from database import log_download, is_ai_mode, is_antispam_enabled
+from database import (
+    log_download,
+    is_ai_mode,
+    is_antispam_enabled,
+    save_media_token,
+    get_media_token_url,
+)
 from services.ai_service import query_continuous_ai
 from services.moderation_service import check_spam
 from services.expense_service import (
@@ -45,7 +51,6 @@ def get_or_create_media_token(url: str) -> str:
     """Map URL to a short token for callback data (max 64 bytes in Telegram)."""
     # Keep cache from growing unboundedly
     if len(URL_TOKEN_CACHE) > 500:
-        # Remove first 100 entries
         keys = list(URL_TOKEN_CACHE.keys())[:100]
         for k in keys:
             URL_TOKEN_CACHE.pop(k, None)
@@ -56,7 +61,58 @@ def get_or_create_media_token(url: str) -> str:
             
     token = uuid.uuid4().hex[:10]
     URL_TOKEN_CACHE[token] = url
+    try:
+        save_media_token(token, url)
+    except Exception as e_tok:
+        logger.warning(f"Could not persist media token: {e_tok}")
     return token
+
+def resolve_media_url(token: str, query=None) -> Optional[str]:
+    """Retrieve original media URL from memory cache, SQLite, or message context."""
+    # 1. Check in-memory cache
+    if token and token in URL_TOKEN_CACHE:
+        return URL_TOKEN_CACHE[token]
+
+    # 2. Check SQLite persistent table
+    if token:
+        try:
+            db_url = get_media_token_url(token)
+            if db_url:
+                URL_TOKEN_CACHE[token] = db_url
+                return db_url
+        except Exception:
+            pass
+
+    # 3. Fallback to message context if available
+    if query and query.message:
+        msg = query.message
+        # Check original user request text if this message is a reply
+        if msg.reply_to_message:
+            candidate_text = msg.reply_to_message.text or msg.reply_to_message.caption or ""
+            extracted = extract_video_url(candidate_text)
+            if extracted:
+                if token:
+                    URL_TOKEN_CACHE[token] = extracted
+                    try:
+                        save_media_token(token, extracted)
+                    except Exception:
+                        pass
+                return extracted
+
+        # Check caption of current message
+        if msg.caption:
+            extracted = extract_video_url(msg.caption)
+            if extracted:
+                return extracted
+
+        # Check inline keyboard buttons (e.g. direct download URL)
+        if msg.reply_markup and msg.reply_markup.inline_keyboard:
+            for row in msg.reply_markup.inline_keyboard:
+                for btn in row:
+                    if btn.url and any(domain in btn.url for domain in ["tiktok.com", "youtube.com", "youtu.be", "facebook.com", "fb.watch", "instagram.com"]):
+                        return btn.url
+
+    return None
 
 async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Detect and process video download requests or AI Continuous Chat."""
@@ -443,7 +499,7 @@ async def handle_media_download_callback(update: Update, context: ContextTypes.D
     
     if data.startswith("dlmp3_"):
         token = data.replace("dlmp3_", "")
-        url = URL_TOKEN_CACHE.get(token)
+        url = resolve_media_url(token, query)
         if not url:
             await query.answer("❌ Link បានផុតកំណត់ហើយ សូមផ្ញើ Link ម្តងទៀត។", show_alert=True)
             return True
@@ -501,7 +557,7 @@ async def handle_media_download_callback(update: Update, context: ContextTypes.D
         
     elif data.startswith("dlthumb_"):
         token = data.replace("dlthumb_", "")
-        url = URL_TOKEN_CACHE.get(token)
+        url = resolve_media_url(token, query)
         if not url:
             await query.answer("❌ Link បានផុតកំណត់ហើយ សូមផ្ញើ Link ម្តងទៀត។", show_alert=True)
             return True
@@ -531,7 +587,7 @@ async def handle_media_download_callback(update: Update, context: ContextTypes.D
         parts = data.split("_")
         token = parts[1] if len(parts) > 1 else ""
         qual = parts[2] if len(parts) > 2 else "1080p"
-        url = URL_TOKEN_CACHE.get(token)
+        url = resolve_media_url(token, query)
         if not url:
             await query.answer("❌ Link បានផុតកំណត់ហើយ សូមផ្ញើ Link ម្តងទៀត។", show_alert=True)
             return True
@@ -550,6 +606,23 @@ async def handle_media_download_callback(update: Update, context: ContextTypes.D
                 f"❌ មិនអាចទាញយកកម្រិត {qual.upper()} បានទេ៖ {res.error_message}\n_ប្រភពដើមប្រហែលជាគ្មានកម្រិត {qual.upper()} ឡើយ។_",
                 parse_mode="Markdown"
             )
+            return True
+
+        # In case the link was a photo slideshow
+        if getattr(res, "is_photo_slideshow", False) and getattr(res, "images", None):
+            try:
+                from telegram import InputMediaPhoto
+                media = []
+                for idx, img_path in enumerate(res.images[:10]):
+                    with open(img_path, "rb") as f_i:
+                        media.append(InputMediaPhoto(media=f_i.read(), caption=f"📸 {res.title}" if idx == 0 else None))
+                await chat.send_media_group(media=media)
+                await status_m.delete()
+            except Exception as e_ps:
+                logger.error(f"Error sending photo slideshow in dlqual: {e_ps}")
+            finally:
+                for p in res.images:
+                    cleanup_file(p)
             return True
 
         try:
@@ -600,7 +673,10 @@ async def handle_media_download_callback(update: Update, context: ContextTypes.D
                 pass
         except Exception as e:
             logger.error(f"Error sending HD video: {e}")
-            await chat.send_message(f"❌ កំហុសក្នុងការផ្ញើវីដេអូ៖ {str(e)[:100]}")
+            await chat.send_message(
+                f"❌ កំហុសក្នុងការផ្ញើវីដេអូកម្រិត {qual.upper()}៖ {str(e)[:120]}\n\n"
+                f"💡 _ប្រសិនបើទំហំ File ធំជាង 50MB (ដែនកំណត់ Telegram) សូមទាញយកកម្រិតធម្មតា ឬមើលតាម Direct Link!_"
+            )
         finally:
             cleanup_file(res.file_path)
         return True

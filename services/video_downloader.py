@@ -188,15 +188,15 @@ def _sync_download(url: str, download_folder: Path, quality: str = "best", audio
     if audio_only:
         fmt = 'bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best'
     elif quality == "4k":
-        fmt = 'bestvideo[height<=2160][filesize<48M]+bestaudio/best[height<=2160][filesize<48M]/bestvideo[height<=1440][filesize<48M]+bestaudio/best'
+        fmt = 'bestvideo[height<=2160][filesize_approx<?48M]+bestaudio/bestvideo[height<=1440][filesize_approx<?48M]+bestaudio/bestvideo[height<=1080][filesize_approx<?48M]+bestaudio/best[filesize_approx<?48M]/best'
     elif quality == "1080p":
-        fmt = 'bestvideo[height<=1080][filesize<48M]+bestaudio/best[height<=1080][filesize<48M]/bestvideo+bestaudio/best'
+        fmt = 'bestvideo[height<=1080][filesize_approx<?48M]+bestaudio/bestvideo[height<=720][filesize_approx<?48M]+bestaudio/best[filesize_approx<?48M]/best'
     elif quality == "720p":
-        fmt = 'bestvideo[height<=720][filesize<48M]+bestaudio/best[height<=720][filesize<48M]/best[height<=720]/best'
+        fmt = 'bestvideo[height<=720][filesize_approx<?48M]+bestaudio/best[height<=720][filesize_approx<?48M]/best[height<=720]/best'
     elif quality == "480p":
-        fmt = 'bestvideo[height<=480][filesize<48M]+bestaudio/best[height<=480][filesize<48M]/best[height<=480]/best'
+        fmt = 'bestvideo[height<=480][filesize_approx<?48M]+bestaudio/best[height<=480][filesize_approx<?48M]/best[height<=480]/best'
     else:
-        fmt = 'bestvideo[height<=2160][filesize<48M]+bestaudio/bestvideo[height<=1080][filesize<48M]+bestaudio/best[height<=1080]/best'
+        fmt = 'bestvideo[height<=2160][filesize_approx<?48M]+bestaudio/bestvideo[height<=1080][filesize_approx<?48M]+bestaudio/best[height<=1080]/best'
 
     ydl_opts: Dict[str, Any] = {
         'format': fmt,

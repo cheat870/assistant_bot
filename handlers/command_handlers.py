@@ -3071,8 +3071,8 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     chat_id = query.message.chat_id
     user = query.from_user
 
-    # Delegate media download callbacks (MP3 & HD Cover)
-    if data.startswith("dlmp3_") or data.startswith("dlthumb_"):
+    # Delegate media download callbacks (MP3, HD Cover, 1080p, 4K)
+    if data.startswith("dlmp3_") or data.startswith("dlthumb_") or data.startswith("dlqual_"):
         from handlers.video_handlers import handle_media_download_callback
         handled = await handle_media_download_callback(update, context)
         if handled:

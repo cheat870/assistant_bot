@@ -173,6 +173,15 @@ def init_db():
         )
     """)
 
+    # Table for Media URL Tokens (persistent cache for callback buttons)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS media_tokens (
+            token TEXT PRIMARY KEY,
+            url TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+
     # Table for Music Channel Archive Logs
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS music_archive (
@@ -1139,6 +1148,44 @@ def get_music_archive_stats() -> Dict[str, Any]:
         "total_archived": total_count,
         "recent": recent
     }
+
+def save_media_token(token: str, url: str) -> bool:
+    """Persist media URL token in SQLite so buttons work across bot restarts."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS media_tokens (
+                token TEXT PRIMARY KEY,
+                url TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        cursor.execute("""
+            INSERT INTO media_tokens (token, url, created_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(token) DO UPDATE SET url = excluded.url, created_at = excluded.created_at
+        """, (token, str(url).strip(), datetime.utcnow().isoformat()))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to save media token {token}: {e}")
+        return False
+
+def get_media_token_url(token: str) -> Optional[str]:
+    """Retrieve media URL associated with a token from SQLite."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT url FROM media_tokens WHERE token = ?", (token,))
+        row = cursor.fetchone()
+        conn.close()
+        if row and row[0]:
+            return row[0]
+    except Exception as e:
+        logger.warning(f"Failed to read media token {token}: {e}")
+    return None
 
 
 
