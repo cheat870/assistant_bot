@@ -305,9 +305,9 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
     if not result.success:
         err_text = f"❌ *ការទាញយកមិនបានសម្រេច!*\n\n{result.error_message}"
         try:
-            await status_msg.edit_text(err_text, parse_mode="Markdown")
+            await status_msg.edit_text(err_text, parse_mode="Markdown", disable_web_page_preview=True)
         except Exception:
-            await update.message.reply_text(err_text, parse_mode="Markdown")
+            await update.message.reply_text(err_text, parse_mode="Markdown", disable_web_page_preview=True)
         return
 
     # Handle TikTok Photo Slideshow / Live Photos mode

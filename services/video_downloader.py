@@ -212,8 +212,7 @@ def _sync_download(url: str, download_folder: Path, quality: str = "best", audio
         'js_runtimes': {'node': {}},
         'extractor_args': {
             'youtube': {
-                'player_client': ['tv', 'web_embedded', 'android'],
-                'player_skip': ['webpage']
+                'player_client': ['android', 'ios', 'web', 'mweb']
             }
         },
     }
@@ -280,12 +279,22 @@ def _sync_download(url: str, download_folder: Path, quality: str = "best", audio
             if fallback_res.success:
                 return fallback_res
                 
-        if "File is larger than max-filesize" in err_str:
+        err_lower = err_str.lower()
+        if "file is larger than max-filesize" in err_lower:
             msg = f"ឯកសារនេះមានទំហំធំជាង {MAX_FILE_SIZE_MB} MB ដែលលើសពីកម្រិត Telegram Bot អាចផ្ញើបាន។"
-        elif "Private video" in err_str or "login" in err_str.lower():
-            msg = "វីដេអូនេះជា Private ឬទាមទារ Login ចូលគណនី។"
+        elif "private video" in err_lower or "login" in err_lower or "sign in" in err_lower:
+            msg = "វីដេអូនេះជា Private ឬទាមទារការ Login ចូលគណនី YouTube។"
+        elif "unavailable" in err_lower or "does not exist" in err_lower or "removed" in err_lower:
+            msg = "វីដេអូនេះមិនមាននៅលើ YouTube ទៀតទេ (ប្រហែលត្រូវបានម្ចាស់លុប Private ឬបិទការចាក់)។"
+        elif "failed to extract any player response" in err_lower:
+            msg = "វីដេអូនេះមិនមាននៅលើ YouTube ទៀតទេ ឬត្រូវបានលុបចេញពី Channel (Unavailable / Deleted)។"
+        elif "copyright" in err_lower:
+            msg = "វីដេអូនេះត្រូវបានបិទដោយសារបញ្ហារក្សាសិទ្ធិ (Copyright Strike)។"
         else:
-            msg = f"កំហុសក្នុងការទាញយក៖ {err_str[:120]}"
+            clean_err = re.sub(r'https?://[^\s]+', '', err_str)
+            clean_err = re.sub(r'please report this issue.*', '', clean_err, flags=re.IGNORECASE).strip()
+            clean_err = clean_err.replace("ERROR:", "").replace("[youtube]", "").strip()
+            msg = f"កំហុសក្នុងការទាញយក៖ {clean_err[:120]}"
         return VideoDownloadResult(success=False, error_message=msg)
     except Exception as e:
         return VideoDownloadResult(success=False, error_message=f"កំហុសបច្ចេកទេស៖ {str(e)[:120]}")
