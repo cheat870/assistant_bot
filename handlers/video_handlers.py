@@ -394,11 +394,12 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 cleanup_file(p)
         return
         
-    # Build buttons for MP3, HD Cover, 1080p, 4K, and direct web link
+    # Build buttons for MP3, HD Cover, 1080p, 4K, 8K, and direct web link
     buttons = [
         [
             InlineKeyboardButton("💎 1080p FHD", callback_data=f"dlqual_{token}_1080p"),
             InlineKeyboardButton("🔥 4K / Best", callback_data=f"dlqual_{token}_4k"),
+            InlineKeyboardButton("🌌 8K Ultra", callback_data=f"dlqual_{token}_8k"),
         ],
         [
             InlineKeyboardButton("🎵 ទាញយកជា MP3", callback_data=f"dlmp3_{token}"),
@@ -602,6 +603,29 @@ async def handle_media_download_callback(update: Update, context: ContextTypes.D
 
         res = await download_video_async(url, quality=qual)
         if not res.success or not res.file_path:
+            err_msg = res.error_message or ""
+            is_size_err = any(k in err_msg.lower() for k in ["50", "48", "ធំជាង", "larger than", "max-filesize"])
+            if is_size_err:
+                web_dl_buttons = []
+                import re
+                yt_match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11})', url)
+                if yt_match:
+                    vid = yt_match.group(1)
+                    web_dl_buttons.append([InlineKeyboardButton("🌐 ទាញយក File 8K/4K ពេញលេញ (SaveFrom)", url=f"https://en.savefrom.net/#url=https://www.youtube.com/watch?v={vid}")])
+                    web_dl_buttons.append([InlineKeyboardButton("🚀 ទាញយកតាម Cobalt (No Ads - 8K/4K)", url=f"https://cobalt.tools")])
+                elif getattr(res, "direct_web_url", None):
+                    web_dl_buttons.append([InlineKeyboardButton("⚡ មើល / Download ផ្ទាល់ (No Wait)", url=res.direct_web_url)])
+                web_dl_buttons.append([InlineKeyboardButton("📻 មើលក្នុង Channel @Song182", url="https://t.me/Song182")])
+
+                await status_m.edit_text(
+                    f"⚠️ *វីដេអូកម្រិត {qual.upper()} នេះមានទំហំធំ ({res.file_size_mb or '> 50'} MB)!*\n\n"
+                    f"Telegram Bot API អនុញ្ញាតឱ្យ Upload វីដេអូត្រឹម **50 MB** ប៉ុណ្ណោះ។\n"
+                    f"👉 សូមចុចប៊ូតុងខាងក្រោមដើម្បីទាញយក File {qual.upper()} ដើមពេញលេញដោយផ្ទាល់ ដោយគ្មានដែនកំណត់ទំហំ៖",
+                    reply_markup=InlineKeyboardMarkup(web_dl_buttons),
+                    parse_mode="Markdown"
+                )
+                return True
+
             await status_m.edit_text(
                 f"❌ មិនអាចទាញយកកម្រិត {qual.upper()} បានទេ៖ {res.error_message}\n_ប្រភពដើមប្រហែលជាគ្មានកម្រិត {qual.upper()} ឡើយ។_",
                 parse_mode="Markdown"
@@ -626,7 +650,13 @@ async def handle_media_download_callback(update: Update, context: ContextTypes.D
             return True
 
         try:
+            caption_tag = "🌌 8K ULTRA HD" if qual == "8k" else f"🎬 *{res.title}* ({qual.upper()})"
             caption = (
+                f"🌌 *{res.title}* (8K ULTRA HD)\n"
+                f"👤 អ្នកបង្កើត: {res.uploader}\n"
+                f"📦 ទំហំ: {res.file_size_mb} MB (កម្រិតច្បាស់បំផុត 8K)\n\n"
+                f"✨ ទាញយកដោយ Smart Assistant Bot 🚀"
+            ) if qual == "8k" else (
                 f"🎬 *{res.title}* ({qual.upper()})\n"
                 f"👤 អ្នកបង្កើត: {res.uploader}\n"
                 f"📦 ទំហំ: {res.file_size_mb} MB (កម្រិតច្បាស់ខ្ពស់)\n\n"

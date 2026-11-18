@@ -184,9 +184,11 @@ def _sync_download(url: str, download_folder: Path, quality: str = "best", audio
     unique_id = str(uuid.uuid4())[:8]
     output_template = str(download_folder / f"media_{unique_id}_%(id)s.%(ext)s")
     
-    # Configure quality format (prioritize 4K / 1080p within Telegram's 50MB bot upload limit)
+    # Configure quality format (prioritize 8K / 4K / 1080p within Telegram's 50MB bot upload limit)
     if audio_only:
         fmt = 'bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best'
+    elif quality == "8k":
+        fmt = 'bestvideo[height<=4320][filesize_approx<?48M]+bestaudio/bestvideo[height<=2160][filesize_approx<?48M]+bestaudio/bestvideo[height<=1080][filesize_approx<?48M]+bestaudio/best[filesize_approx<?48M]/best'
     elif quality == "4k":
         fmt = 'bestvideo[height<=2160][filesize_approx<?48M]+bestaudio/bestvideo[height<=1440][filesize_approx<?48M]+bestaudio/bestvideo[height<=1080][filesize_approx<?48M]+bestaudio/best[filesize_approx<?48M]/best'
     elif quality == "1080p":
