@@ -433,7 +433,8 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
         caption = (
             f"🎬 *{result.title}*\n"
             f"👤 អ្នកបង្កើត: {result.uploader}\n"
-            f"📦 ទំហំ: {result.file_size_mb} MB\n\n"
+            f"📦 ទំហំ: {result.file_size_mb} MB\n"
+            f"🔗 {url}\n\n"
             f"✨ ទាញយកដោយ Smart Assistant Bot 🚀"
         )
         
@@ -489,226 +490,265 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
         cleanup_file(result.file_path)
 
 async def handle_media_download_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Handle callbacks for MP3 extraction or HD Cover download."""
+    """Handle callbacks for MP3 extraction, HD Cover, 1080p, 4K, and 8K downloads."""
     query = update.callback_query
-    data = query.data
-    
-    if not (data.startswith("dlmp3_") or data.startswith("dlthumb_") or data.startswith("dlqual_")):
+    if not query or not query.data:
         return False
         
-    chat = query.message.chat
-    
-    if data.startswith("dlmp3_"):
-        token = data.replace("dlmp3_", "")
-        url = resolve_media_url(token, query)
-        if not url:
-            await query.answer("❌ Link បានផុតកំណត់ហើយ សូមផ្ញើ Link ម្តងទៀត។", show_alert=True)
-            return True
-            
-        await query.answer("⏳ កំពុងបម្លែង និងទាញយកសំឡេង MP3...")
-        await chat.send_action("upload_voice")
-        res = await download_audio_async(url)
-        if not res.success or not res.file_path:
-            await chat.send_message(f"❌ មិនអាចទាញយកសំឡេងបានទេ៖ {res.error_message}")
-            return True
-            
-        try:
-            sent_audio = None
-            with open(res.file_path, "rb") as audio_file:
-                sent_audio = await chat.send_audio(
-                    audio=audio_file,
-                    title=res.title,
-                    performer=res.uploader,
-                    duration=res.duration,
-                    caption=f"🎵 *{res.title}*\n📦 ទំហំ៖ {res.file_size_mb} MB\n✨ Smart Assistant Bot",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("📻 ស្តាប់ក្នុង Music Channel", url="https://t.me/Song182")]
-                    ]),
-                    parse_mode="Markdown",
-                    read_timeout=600.0,
-                )
+    data = query.data
+    if not (data.startswith("dlmp3_") or data.startswith("dlthumb_") or data.startswith("dlqual_")):
+        return False
 
-            # Auto-archive MP3 to channel @Song182
-            if sent_audio and sent_audio.audio:
-                try:
-                    from services.music_archive_service import archive_song_to_channel
-                    dur_sec = res.duration or 0
-                    asyncio.create_task(
-                        archive_song_to_channel(
-                            bot=context.bot,
-                            user=update.effective_user,
-                            song_data={
-                                "title": res.title,
-                                "performer": res.uploader,
-                                "duration": dur_sec,
-                                "duration_str": f"{dur_sec // 60}:{dur_sec % 60:02d}" if dur_sec else "Unknown",
-                                "query": url or res.title,
-                            },
-                            sent_audio_file_id=sent_audio.audio.file_id
+    # IMMEDIATELY answer callback to dismiss client spinner instantly!
+    try:
+        await query.answer()
+    except Exception:
+        pass
+
+    chat = query.message.chat if query.message else update.effective_chat
+    if not chat:
+        return True
+
+    try:
+        if data.startswith("dlmp3_"):
+            token = data.replace("dlmp3_", "")
+            url = resolve_media_url(token, query)
+            if not url:
+                await chat.send_message("❌ Link វីដេអូបានផុតកំណត់ហើយ សូមផ្ញើ Link ម្តងទៀតណា៎។")
+                return True
+                
+            status_m = await chat.send_message("⏳ កំពុងបម្លែង និងទាញយកសំឡេង MP3... សូមរង់ចាំបន្តិច 🎵")
+            await chat.send_action("upload_voice")
+            res = await download_audio_async(url)
+            if not res.success or not res.file_path:
+                await status_m.edit_text(f"❌ មិនអាចទាញយកសំឡេងបានទេ៖ {res.error_message}")
+                return True
+                
+            try:
+                sent_audio = None
+                with open(res.file_path, "rb") as audio_file:
+                    try:
+                        sent_audio = await chat.send_audio(
+                            audio=audio_file,
+                            title=res.title,
+                            performer=res.uploader,
+                            duration=res.duration,
+                            caption=f"🎵 {res.title}\n📦 ទំហំ៖ {res.file_size_mb} MB\n✨ Smart Assistant Bot",
+                            reply_markup=InlineKeyboardMarkup([
+                                [InlineKeyboardButton("📻 ស្តាប់ក្នុង Music Channel", url="https://t.me/Song182")]
+                            ]),
+                            read_timeout=600.0,
                         )
+                    except Exception:
+                        audio_file.seek(0)
+                        sent_audio = await chat.send_audio(
+                            audio=audio_file,
+                            title=res.title,
+                            performer=res.uploader,
+                            duration=res.duration,
+                            caption=f"🎵 {res.title}",
+                            read_timeout=600.0,
+                        )
+
+                # Auto-archive MP3 to channel @Song182
+                if sent_audio and sent_audio.audio:
+                    try:
+                        from services.music_archive_service import archive_song_to_channel
+                        dur_sec = res.duration or 0
+                        asyncio.create_task(
+                            archive_song_to_channel(
+                                bot=context.bot,
+                                user=update.effective_user,
+                                song_data={
+                                    "title": res.title,
+                                    "performer": res.uploader,
+                                    "duration": dur_sec,
+                                    "duration_str": f"{dur_sec // 60}:{dur_sec % 60:02d}" if dur_sec else "Unknown",
+                                    "query": url or res.title,
+                                },
+                                sent_audio_file_id=sent_audio.audio.file_id
+                            )
+                        )
+                    except Exception as e_arch_mp3:
+                        logger.warning(f"Could not auto-archive MP3 audio: {e_arch_mp3}")
+                try:
+                    await status_m.delete()
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.error(f"Error sending audio: {e}")
+                await chat.send_message(f"❌ កំហុសក្នុងការផ្ញើសំឡេង៖ {str(e)[:100]}")
+            finally:
+                cleanup_file(res.file_path)
+            return True
+
+        elif data.startswith("dlthumb_"):
+            token = data.replace("dlthumb_", "")
+            url = resolve_media_url(token, query)
+            if not url:
+                await chat.send_message("❌ Link វីដេអូបានផុតកំណត់ហើយ សូមផ្ញើ Link ម្តងទៀតណា៎។")
+                return True
+                
+            status_m = await chat.send_message("⏳ កំពុងទាញយករូប Thumbnail HD... 🖼️")
+            await chat.send_action("upload_photo")
+            thumb_path = await download_thumbnail_hd(url)
+            if not thumb_path:
+                await status_m.edit_text("❌ មិនអាចទាញយករូបភាព Cover បានទេ។")
+                return True
+                
+            try:
+                with open(thumb_path, "rb") as photo_file:
+                    await chat.send_photo(
+                        photo=photo_file,
+                        caption="🖼️ រូបភាព Thumbnail / Cover (High Definition) ✨",
                     )
-                except Exception as e_arch_mp3:
-                    logger.warning(f"Could not auto-archive MP3 audio: {e_arch_mp3}")
-        except Exception as e:
-            logger.error(f"Error sending audio: {e}")
-            await chat.send_message(f"❌ កំហុសក្នុងការផ្ញើសំឡេង៖ {str(e)[:100]}")
-        finally:
-            cleanup_file(res.file_path)
-        return True
-        
-    elif data.startswith("dlthumb_"):
-        token = data.replace("dlthumb_", "")
-        url = resolve_media_url(token, query)
-        if not url:
-            await query.answer("❌ Link បានផុតកំណត់ហើយ សូមផ្ញើ Link ម្តងទៀត។", show_alert=True)
-            return True
-            
-        await query.answer("⏳ កំពុងទាញយករូប Thumbnail HD...")
-        await chat.send_action("upload_photo")
-        thumb_path = await download_thumbnail_hd(url)
-        if not thumb_path:
-            await chat.send_message("❌ មិនអាចទាញយករូបភាព Cover បានទេ។")
-            return True
-            
-        try:
-            with open(thumb_path, "rb") as photo_file:
-                await chat.send_photo(
-                    photo=photo_file,
-                    caption="🖼️ *រូបភាព Thumbnail / Cover (High Definition)* ✨",
-                    parse_mode="Markdown",
-                )
-        except Exception as e:
-            logger.error(f"Error sending thumbnail: {e}")
-            await chat.send_message(f"❌ កំហុសក្នុងការផ្ញើរូបភាព៖ {str(e)[:100]}")
-        finally:
-            cleanup_file(thumb_path)
-        return True
-
-    elif data.startswith("dlqual_"):
-        parts = data.split("_")
-        token = parts[1] if len(parts) > 1 else ""
-        qual = parts[2] if len(parts) > 2 else "1080p"
-        url = resolve_media_url(token, query)
-        if not url:
-            await query.answer("❌ Link បានផុតកំណត់ហើយ សូមផ្ញើ Link ម្តងទៀត។", show_alert=True)
+                try:
+                    await status_m.delete()
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.error(f"Error sending thumbnail: {e}")
+                await chat.send_message(f"❌ កំហុសក្នុងការផ្ញើរូបភាព៖ {str(e)[:100]}")
+            finally:
+                cleanup_file(thumb_path)
             return True
 
-        await query.answer(f"⏳ កំពុងដំណើរការទាញយកកម្រិត {qual.upper()}...")
-        status_m = await chat.send_message(
-            f"⏳ *កំពុងទាញយកវីដេអូកម្រិតច្បាស់ {qual.upper()} (Ultra HD)...*\n"
-            f"សូមរង់ចាំបន្តិចណា៎! 🚀",
-            parse_mode="Markdown"
-        )
-        await chat.send_action("upload_video")
+        elif data.startswith("dlqual_"):
+            parts = data.split("_")
+            token = parts[1] if len(parts) > 1 else ""
+            qual = parts[2] if len(parts) > 2 else "1080p"
+            url = resolve_media_url(token, query)
+            if not url:
+                await chat.send_message("❌ Link វីដេអូបានផុតកំណត់ហើយ សូមផ្ញើ Link ម្តងទៀតណា៎។")
+                return True
 
-        res = await download_video_async(url, quality=qual)
-        if not res.success or not res.file_path:
-            err_msg = res.error_message or ""
-            is_size_err = any(k in err_msg.lower() for k in ["50", "48", "ធំជាង", "larger than", "max-filesize"])
-            if is_size_err:
-                web_dl_buttons = []
-                import re
-                yt_match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11})', url)
-                if yt_match:
-                    vid = yt_match.group(1)
-                    web_dl_buttons.append([InlineKeyboardButton("🌐 ទាញយក File 8K/4K ពេញលេញ (SaveFrom)", url=f"https://en.savefrom.net/#url=https://www.youtube.com/watch?v={vid}")])
-                    web_dl_buttons.append([InlineKeyboardButton("🚀 ទាញយកតាម Cobalt (No Ads - 8K/4K)", url=f"https://cobalt.tools")])
-                elif getattr(res, "direct_web_url", None):
-                    web_dl_buttons.append([InlineKeyboardButton("⚡ មើល / Download ផ្ទាល់ (No Wait)", url=res.direct_web_url)])
-                web_dl_buttons.append([InlineKeyboardButton("📻 មើលក្នុង Channel @Song182", url="https://t.me/Song182")])
+            status_m = await chat.send_message(
+                f"⏳ កំពុងទាញយកវីដេអូកម្រិតច្បាស់ {qual.upper()}...\n"
+                f"សូមរង់ចាំបន្តិចណា៎! 🚀"
+            )
+            await chat.send_action("upload_video")
+
+            res = await download_video_async(url, quality=qual)
+            if not res.success or not res.file_path:
+                err_msg = res.error_message or ""
+                is_size_err = any(k in err_msg.lower() for k in ["50", "48", "ធំជាង", "larger than", "max-filesize"])
+                if is_size_err:
+                    web_dl_buttons = []
+                    import re
+                    yt_match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11})', url)
+                    if yt_match:
+                        vid = yt_match.group(1)
+                        web_dl_buttons.append([InlineKeyboardButton("🌐 ទាញយក File 8K/4K ពេញលេញ (SaveFrom)", url=f"https://en.savefrom.net/#url=https://www.youtube.com/watch?v={vid}")])
+                        web_dl_buttons.append([InlineKeyboardButton("🚀 ទាញយកតាម Cobalt (No Ads - 8K/4K)", url=f"https://cobalt.tools")])
+                    elif getattr(res, "direct_web_url", None):
+                        web_dl_buttons.append([InlineKeyboardButton("⚡ មើល / Download ផ្ទាល់ (No Wait)", url=res.direct_web_url)])
+                    web_dl_buttons.append([InlineKeyboardButton("📻 មើលក្នុង Channel @Song182", url="https://t.me/Song182")])
+
+                    await status_m.edit_text(
+                        f"⚠️ វីដេអូកម្រិត {qual.upper()} នេះមានទំហំធំ ({res.file_size_mb or '> 50'} MB)!\n\n"
+                        f"Telegram Bot API អនុញ្ញាតឱ្យ Upload វីដេអូត្រឹម 50 MB ប៉ុណ្ណោះ។\n"
+                        f"👉 សូមចុចប៊ូតុងខាងក្រោមដើម្បីទាញយក File {qual.upper()} ដើមពេញលេញដោយផ្ទាល់ ដោយគ្មានដែនកំណត់ទំហំ៖",
+                        reply_markup=InlineKeyboardMarkup(web_dl_buttons)
+                    )
+                    return True
 
                 await status_m.edit_text(
-                    f"⚠️ *វីដេអូកម្រិត {qual.upper()} នេះមានទំហំធំ ({res.file_size_mb or '> 50'} MB)!*\n\n"
-                    f"Telegram Bot API អនុញ្ញាតឱ្យ Upload វីដេអូត្រឹម **50 MB** ប៉ុណ្ណោះ។\n"
-                    f"👉 សូមចុចប៊ូតុងខាងក្រោមដើម្បីទាញយក File {qual.upper()} ដើមពេញលេញដោយផ្ទាល់ ដោយគ្មានដែនកំណត់ទំហំ៖",
-                    reply_markup=InlineKeyboardMarkup(web_dl_buttons),
-                    parse_mode="Markdown"
+                    f"❌ មិនអាចទាញយកកម្រិត {qual.upper()} បានទេ៖ {res.error_message}\n(ប្រភពដើមប្រហែលជាគ្មានកម្រិត {qual.upper()} ឡើយ)"
                 )
                 return True
 
-            await status_m.edit_text(
-                f"❌ មិនអាចទាញយកកម្រិត {qual.upper()} បានទេ៖ {res.error_message}\n_ប្រភពដើមប្រហែលជាគ្មានកម្រិត {qual.upper()} ឡើយ។_",
-                parse_mode="Markdown"
-            )
-            return True
-
-        # In case the link was a photo slideshow
-        if getattr(res, "is_photo_slideshow", False) and getattr(res, "images", None):
-            try:
-                from telegram import InputMediaPhoto
-                media = []
-                for idx, img_path in enumerate(res.images[:10]):
-                    with open(img_path, "rb") as f_i:
-                        media.append(InputMediaPhoto(media=f_i.read(), caption=f"📸 {res.title}" if idx == 0 else None))
-                await chat.send_media_group(media=media)
-                await status_m.delete()
-            except Exception as e_ps:
-                logger.error(f"Error sending photo slideshow in dlqual: {e_ps}")
-            finally:
-                for p in res.images:
-                    cleanup_file(p)
-            return True
-
-        try:
-            caption_tag = "🌌 8K ULTRA HD" if qual == "8k" else f"🎬 *{res.title}* ({qual.upper()})"
-            caption = (
-                f"🌌 *{res.title}* (8K ULTRA HD)\n"
-                f"👤 អ្នកបង្កើត: {res.uploader}\n"
-                f"📦 ទំហំ: {res.file_size_mb} MB (កម្រិតច្បាស់បំផុត 8K)\n\n"
-                f"✨ ទាញយកដោយ Smart Assistant Bot 🚀"
-            ) if qual == "8k" else (
-                f"🎬 *{res.title}* ({qual.upper()})\n"
-                f"👤 អ្នកបង្កើត: {res.uploader}\n"
-                f"📦 ទំហំ: {res.file_size_mb} MB (កម្រិតច្បាស់ខ្ពស់)\n\n"
-                f"✨ ទាញយកដោយ Smart Assistant Bot 🚀"
-            )
-            sent_v = None
-            with open(res.file_path, "rb") as video_file:
-                sent_v = await chat.send_video(
-                    video=video_file,
-                    caption=caption,
-                    duration=res.duration,
-                    supports_streaming=True,
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("📻 មើលក្នុង Channel @Song182", url="https://t.me/Song182")]
-                    ]),
-                    parse_mode="Markdown",
-                    read_timeout=900.0,
-                    write_timeout=900.0,
-                )
-
-            # Auto-archive HD video to channel @Song182
-            if sent_v and sent_v.video:
+            # In case the link was a photo slideshow
+            if getattr(res, "is_photo_slideshow", False) and getattr(res, "images", None):
                 try:
-                    from services.music_archive_service import archive_video_to_channel
-                    asyncio.create_task(
-                        archive_video_to_channel(
-                            bot=context.bot,
-                            user=update.effective_user,
-                            video_data={
-                                "title": f"{res.title} ({qual.upper()})",
-                                "uploader": res.uploader,
-                                "duration": res.duration,
-                                "url": url,
-                            },
-                            sent_video_file_id=sent_v.video.file_id
-                        )
-                    )
-                except Exception as e_arch_hd:
-                    logger.warning(f"Could not auto-archive HD video to channel: {e_arch_hd}")
+                    from telegram import InputMediaPhoto
+                    media = []
+                    for idx, img_path in enumerate(res.images[:10]):
+                        with open(img_path, "rb") as f_i:
+                            media.append(InputMediaPhoto(media=f_i.read(), caption=f"📸 {res.title}" if idx == 0 else None))
+                    await chat.send_media_group(media=media)
+                    await status_m.delete()
+                except Exception as e_ps:
+                    logger.error(f"Error sending photo slideshow in dlqual: {e_ps}")
+                finally:
+                    for p in res.images:
+                        cleanup_file(p)
+                return True
 
             try:
-                await status_m.delete()
-            except Exception:
-                pass
-        except Exception as e:
-            logger.error(f"Error sending HD video: {e}")
-            await chat.send_message(
-                f"❌ កំហុសក្នុងការផ្ញើវីដេអូកម្រិត {qual.upper()}៖ {str(e)[:120]}\n\n"
-                f"💡 _ប្រសិនបើទំហំ File ធំជាង 50MB (ដែនកំណត់ Telegram) សូមទាញយកកម្រិតធម្មតា ឬមើលតាម Direct Link!_"
-            )
-        finally:
-            cleanup_file(res.file_path)
+                caption = (
+                    f"🎬 {res.title} ({qual.upper()})\n"
+                    f"👤 អ្នកបង្កើត: {res.uploader}\n"
+                    f"📦 ទំហំ: {res.file_size_mb} MB\n\n"
+                    f"✨ ទាញយកដោយ Smart Assistant Bot 🚀"
+                )
+                sent_v = None
+                with open(res.file_path, "rb") as video_file:
+                    try:
+                        sent_v = await chat.send_video(
+                            video=video_file,
+                            caption=caption,
+                            duration=res.duration,
+                            supports_streaming=True,
+                            reply_markup=InlineKeyboardMarkup([
+                                [InlineKeyboardButton("📻 មើលក្នុង Channel @Song182", url="https://t.me/Song182")]
+                            ]),
+                            read_timeout=900.0,
+                            write_timeout=900.0,
+                        )
+                    except Exception as e_v_send:
+                        logger.warning(f"Error sending video: {e_v_send}")
+                        video_file.seek(0)
+                        sent_v = await chat.send_video(
+                            video=video_file,
+                            caption=f"🎬 {res.title[:80]}",
+                            duration=res.duration,
+                            supports_streaming=True,
+                            read_timeout=900.0,
+                            write_timeout=900.0,
+                        )
+
+                # Auto-archive HD video to channel @Song182
+                if sent_v and sent_v.video:
+                    try:
+                        from services.music_archive_service import archive_video_to_channel
+                        asyncio.create_task(
+                            archive_video_to_channel(
+                                bot=context.bot,
+                                user=update.effective_user,
+                                video_data={
+                                    "title": f"{res.title} ({qual.upper()})",
+                                    "uploader": res.uploader,
+                                    "duration": res.duration,
+                                    "url": url,
+                                },
+                                sent_video_file_id=sent_v.video.file_id
+                            )
+                        )
+                    except Exception as e_arch_hd:
+                        logger.warning(f"Could not auto-archive HD video to channel: {e_arch_hd}")
+
+                try:
+                    await status_m.delete()
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.error(f"Error sending HD video: {e}")
+                await chat.send_message(
+                    f"❌ កំហុសក្នុងការផ្ញើវីដេអូកម្រិត {qual.upper()}៖ {str(e)[:120]}\n\n"
+                    f"💡 ប្រសិនបើទំហំ File ធំជាង 50MB (ដែនកំណត់ Telegram) សូមទាញយកកម្រិតធម្មតា ឬមើលតាម Direct Link!"
+                )
+            finally:
+                cleanup_file(res.file_path)
+            return True
+
+    except Exception as e_top:
+        logger.error(f"Top-level error in handle_media_download_callback: {e_top}", exc_info=True)
+        try:
+            await chat.send_message(f"❌ កំហុសបច្ចេកទេសក្នុងការទាញយក៖ {str(e_top)[:120]}")
+        except Exception:
+            pass
         return True
+
+    return False
         
     return False
