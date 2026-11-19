@@ -2155,42 +2155,77 @@ async def handle_pdf_document(update: Update, context: ContextTypes.DEFAULT_TYPE
 # AI Image Upscaler & Enhancer Handler
 # -------------------------------------------------------------
 async def enhance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Upscale and enhance image to crystal clear HD quality: /enhance or /upscale."""
+    """Upscale and enhance image to crystal clear 2K, 4K or 8K quality: /enhance or /upscale."""
     import io
     target_msg = update.message.reply_to_message if update.message.reply_to_message else update.message
     photos = target_msg.photo if target_msg else None
 
+    arg = (context.args[0] if context.args else "").lower().strip()
+    target_mode = "4k"
+    if "8k" in arg:
+        target_mode = "8k"
+    elif "2k" in arg:
+        target_mode = "2k"
+    elif "4k" in arg:
+        target_mode = "4k"
+
     if not photos:
         await update.message.reply_text(
-            "🔍 *របៀបប្រើប្រាស់ AI Image Enhancer (ធ្វើឱ្យរូបច្បាស់ HD)៖*\n\n"
-            "👉 ផ្ញើរូបភាពដោយភ្ជាប់ពាក្យ `/enhance` ក្នុង Caption\n"
-            "👉 ឬចុច **Reply** លើរូបភាពណាមួយ រួចវាយពាក្យ `/enhance` ឬ `/upscale`\n\n"
-            "Bot នឹងជួយសម្អាត Noise, ពង្រីកទំហំ 2x-4x និងធ្វើឱ្យរូបភាពកាន់តែច្បាស់ភ្លាមៗ! ✨",
+            "🔍 *របៀបប្រើប្រាស់ AI Image Enhancer (ធ្វើឱ្យរូបច្បាស់ 2K / 4K / 8K)៖*\n\n"
+            "👉 ផ្ញើរូបភាពដោយភ្ជាប់ពាក្យ `/enhance` ឬ `/enhance 4k` ឬ `/enhance 8k`\n"
+            "👉 ឬចុច **Reply** លើរូបភាពណាមួយ រួចវាយពាក្យ `/enhance` ឬ `/upscale 8k`\n\n"
+            "Bot នឹងជួយសម្អាត Noise, Super-Resolution ពង្រីកដល់ 4K Ultra ឬ 8K Super-Res និងផ្ញើ File ដើមមិនបង្រួមជូនភ្លាមៗ! ✨",
             parse_mode="Markdown"
         )
         return
 
     photo = photos[-1]
+    mode_label = "8K Super-Res" if target_mode == "8k" else ("4K Ultra" if target_mode == "4k" else "2K HD")
     await update.message.chat.send_action("upload_photo")
-    status = await update.message.reply_text("🔍 *កំពុងសម្អាត Noise និងបង្កើនគុណភាពរូបភាព HD...* ⏳", parse_mode="Markdown")
+    status = await update.message.reply_text(f"🔍 *កំពុងដំណើរការ Super-Resolution កម្រិត {mode_label}...* ⏳", parse_mode="Markdown")
 
     try:
         tg_file = await context.bot.get_file(photo.file_id)
         img_bytes = bytes(await tg_file.download_as_bytearray())
-        enhanced_bytes, metrics = enhance_image(img_bytes)
+        from services.image_enhancer_service import enhance_image
+        enhanced_bytes, metrics = enhance_image(img_bytes, resolution_mode=target_mode)
 
         caption = (
-            f"✨ *រូបភាពរបស់អ្នកត្រូវបានបង្កើនគុណភាព HD រួចរាល់!* 🔍\n\n"
+            f"✨ *រូបភាពរបស់អ្នកត្រូវបានបង្កើនគុណភាព {metrics['mode']} រួចរាល់!* 🔍\n\n"
             f"📐 *ទំហំដើម:* `{metrics['orig_width']} x {metrics['orig_height']}` px\n"
-            f"📈 *ទំហំថ្មី (HD):* `{metrics['new_width']} x {metrics['new_height']}` px (+{metrics['scale']}x)\n"
+            f"📈 *ទំហំថ្មី ({metrics['mode']}):* `{metrics['new_width']} x {metrics['new_height']}` px (+{metrics['scale']}x)\n"
             f"⚡ *រយៈពេលដំណើរការ:* `{metrics['elapsed_seconds']}s`"
         )
+
+        buttons = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("💎 2K HD", callback_data="btn_upscale_2k"),
+                InlineKeyboardButton("🔥 4K Ultra", callback_data="btn_upscale_4k"),
+                InlineKeyboardButton("🌌 8K Super-Res", callback_data="btn_upscale_8k"),
+            ],
+            [
+                InlineKeyboardButton("💧 ដាក់ Watermark", callback_data="btn_watermark_info"),
+                InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+            ]
+        ])
 
         await update.message.reply_photo(
             photo=io.BytesIO(enhanced_bytes),
             caption=caption,
+            reply_markup=buttons,
             parse_mode="Markdown"
         )
+
+        # If 4K or 8K, also send uncompressed Document so Telegram does not compress pixels
+        if target_mode in ["4k", "8k"]:
+            doc_io = io.BytesIO(enhanced_bytes)
+            doc_io.name = f"upscaled_{target_mode}_{metrics['new_width']}x{metrics['new_height']}.jpg"
+            await update.message.reply_document(
+                document=doc_io,
+                caption=f"📁 *ឯកសាររូបភាពដើម {metrics['mode']} មិនបង្រួម ({metrics['new_width']} x {metrics['new_height']} px)* ✨",
+                parse_mode="Markdown"
+            )
+
         try:
             await status.delete()
         except Exception:
@@ -3578,31 +3613,64 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             )
             await query.message.reply_text(msg, parse_mode="Markdown")
 
-        elif data in ["btn_enhance_info", "btn_photo_enhance_help"]:
+        elif data in ["btn_upscale_2k", "btn_upscale_4k", "btn_upscale_8k", "btn_enhance_info", "btn_photo_enhance_help"]:
+            if data == "btn_upscale_8k":
+                target_mode = "8k"
+            elif data == "btn_upscale_2k":
+                target_mode = "2k"
+            else: # btn_upscale_4k or btn_enhance_info or btn_photo_enhance_help
+                target_mode = "4k"
+
             photos = query.message.photo if query.message else None
             if photos:
-                await query.answer("🔍 កំពុងធ្វើឱ្យរូបភាពកាន់តែច្បាស់ HD (Upscaling)...")
-                status_msg = await query.message.reply_text("🔍 *កំពុងដំណើរការ Super-Resolution & សម្អាត Noise...* ⏳", parse_mode="Markdown")
+                mode_label = "8K Super-Res" if target_mode == "8k" else ("4K Ultra" if target_mode == "4k" else "2K HD")
+                await query.answer(f"🔍 កំពុងធ្វើឱ្យរូបភាពកាន់តែច្បាស់ {mode_label}...")
+                status_msg = await query.message.reply_text(f"🔍 *កំពុងដំណើរការ Super-Resolution កម្រិត {mode_label}...* ⏳", parse_mode="Markdown")
                 await query.message.chat.send_action("upload_photo")
                 try:
                     photo = photos[-1]
                     tg_file = await context.bot.get_file(photo.file_id)
                     img_bytes = bytes(await tg_file.download_as_bytearray())
                     from services.image_enhancer_service import enhance_image
-                    enhanced_bytes, metrics = enhance_image(img_bytes)
+                    enhanced_bytes, metrics = enhance_image(img_bytes, resolution_mode=target_mode)
 
                     import io
                     caption = (
-                        f"✨ *រូបភាពត្រូវបានបង្កើនគុណភាព HD (Upscale 2x) រួចរាល់!* 🔍\n\n"
+                        f"✨ *រូបភាពត្រូវបានបង្កើនគុណភាព {metrics['mode']} រួចរាល់!* 🔍\n\n"
                         f"📐 *ទំហំដើម:* `{metrics['orig_width']} x {metrics['orig_height']}` px\n"
-                        f"📈 *ទំហំថ្មី (HD):* `{metrics['new_width']} x {metrics['new_height']}` px (+{metrics['scale']}x)\n"
+                        f"📈 *ទំហំថ្មី ({metrics['mode']}):* `{metrics['new_width']} x {metrics['new_height']}` px (+{metrics['scale']}x)\n"
                         f"⚡ *រយៈពេលដំណើរការ:* `{metrics['elapsed_seconds']}s`"
                     )
+
+                    buttons = InlineKeyboardMarkup([
+                        [
+                            InlineKeyboardButton("💎 2K HD", callback_data="btn_upscale_2k"),
+                            InlineKeyboardButton("🔥 4K Ultra", callback_data="btn_upscale_4k"),
+                            InlineKeyboardButton("🌌 8K Super-Res", callback_data="btn_upscale_8k"),
+                        ],
+                        [
+                            InlineKeyboardButton("💧 ដាក់ Watermark", callback_data="btn_watermark_info"),
+                            InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+                        ]
+                    ])
+
                     await query.message.reply_photo(
                         photo=io.BytesIO(enhanced_bytes),
                         caption=caption,
+                        reply_markup=buttons,
                         parse_mode="Markdown"
                     )
+
+                    # If 4K or 8K, also send uncompressed Document so Telegram does not compress pixels
+                    if target_mode in ["4k", "8k"]:
+                        doc_io = io.BytesIO(enhanced_bytes)
+                        doc_io.name = f"upscaled_{target_mode}_{metrics['new_width']}x{metrics['new_height']}.jpg"
+                        await query.message.reply_document(
+                            document=doc_io,
+                            caption=f"📁 *ឯកសាររូបភាពដើម {metrics['mode']} មិនបង្រួម ({metrics['new_width']} x {metrics['new_height']} px)* ✨",
+                            parse_mode="Markdown"
+                        )
+
                     try:
                         await status_msg.delete()
                     except Exception:
@@ -3614,9 +3682,9 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 await query.answer()
                 msg = (
                     "🔍 *របៀបធ្វើឱ្យរូបភាពកាន់តែច្បាស់ (AI Image Enhancer)៖*\n\n"
-                    "👉 ចុច **Reply** លើរូបភាពណាមួយ រួចវាយ `/enhance` ឬ `/upscale`\n"
-                    "👉 ឬផ្ញើរូបភាពថ្មីដោយដាក់ Caption ថា `/enhance`\n\n"
-                    "Bot នឹងជួយសម្អាត Noise, ពង្រីកទំហំ 2x-4x និងធ្វើឱ្យរូបភាពកាន់តែច្បាស់ភ្លាមៗ! ✨"
+                    "👉 ចុច **Reply** លើរូបភាពណាមួយ រួចវាយ `/enhance` ឬ `/enhance 4k` ឬ `/enhance 8k`\n"
+                    "👉 ឬផ្ញើរូបភាពថ្មីដោយដាក់ Caption ថា `/enhance 4k` ឬ `/enhance 8k`\n\n"
+                    "Bot នឹងជួយសម្អាត Noise, Super-Resolution ពង្រីកដល់ 4K Ultra ឬ 8K Super-Res និងផ្ញើ File ដើមមិនបង្រួមជូនភ្លាមៗ! ✨"
                 )
                 await query.message.reply_text(msg, parse_mode="Markdown")
 
@@ -4162,9 +4230,15 @@ async def imagine_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔍 ធ្វើឱ្យច្បាស់ (Upscale)", callback_data="btn_enhance_info")],
-            [InlineKeyboardButton("💧 ដាក់ Watermark", callback_data="btn_watermark_info")],
-            [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            [
+                InlineKeyboardButton("💎 2K HD", callback_data="btn_upscale_2k"),
+                InlineKeyboardButton("🔥 4K Ultra", callback_data="btn_upscale_4k"),
+                InlineKeyboardButton("🌌 8K Super-Res", callback_data="btn_upscale_8k"),
+            ],
+            [
+                InlineKeyboardButton("💧 ដាក់ Watermark", callback_data="btn_watermark_info"),
+                InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+            ]
         ])
 
         await update.message.reply_photo(

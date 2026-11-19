@@ -1,23 +1,25 @@
 import io
 import time
 import logging
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, Optional
 import cv2
 import numpy as np
 from PIL import Image, ImageEnhance
 
 logger = logging.getLogger(__name__)
 
-def enhance_image(image_bytes: bytes, target_scale: int = 2) -> Tuple[bytes, Dict[str, Any]]:
+def enhance_image(
+    image_bytes: bytes,
+    target_scale: int = 4,
+    resolution_mode: Optional[str] = None
+) -> Tuple[bytes, Dict[str, Any]]:
     """
-    Enhance, denoise, sharpen and upscale an image to high-definition quality.
+    Enhance, denoise, sharpen and upscale an image to crystal-clear 2K, 4K, or 8K Super-Resolution.
     
-    Steps:
-      1. Edge-preserving bilateral denoising to remove compression artifacts.
-      2. Super-resolution upscaling (Lanczos-4 interpolation).
-      3. Unsharp masking to accentuate fine textures, facial lines, and contours.
-      4. CLAHE on LAB color space to optimize dynamic range & local contrast.
-      5. Subtle color vibrance tuning via Pillow.
+    Modes:
+      - '2k': ~1920 - 2560 px (High-Definition 2K/FHD)
+      - '4k': ~3840 - 4096 px (Ultra-HD 4K Cinematic)
+      - '8k': ~7680 - 8192 px (Super-Resolution 8K Wallpaper)
     """
     t0 = time.time()
     nparr = np.frombuffer(image_bytes, np.uint8)
@@ -27,28 +29,44 @@ def enhance_image(image_bytes: bytes, target_scale: int = 2) -> Tuple[bytes, Dic
         raise ValueError("Could not decode image from provided bytes.")
         
     orig_h, orig_w = img.shape[:2]
-    
-    # Determine adaptive scale factor
-    # If image is very small (< 400px), upscale 4x; otherwise 2x
-    if max(orig_w, orig_h) <= 450:
-        scale = max(target_scale, 4)
-    elif max(orig_w, orig_h) >= 2000:
-        scale = 1  # Already high-res; focus on denoising + sharpening + contrast
-    else:
-        scale = target_scale
-        
-    new_w = min(orig_w * scale, 4096)
-    new_h = min(orig_h * scale, 4096)
+    max_orig = max(orig_w, orig_h)
+
+    # Determine mode from parameter or target_scale
+    norm_mode = (resolution_mode or "").lower().strip()
+    if not norm_mode:
+        if target_scale >= 8:
+            norm_mode = "8k"
+        elif target_scale >= 4:
+            norm_mode = "4k"
+        else:
+            norm_mode = "2k"
+
+    if norm_mode == "8k":
+        target_dim = 7680
+        cap = 8192
+        mode_label = "8K Super-Res"
+        jpeg_quality = 93
+    elif norm_mode == "4k":
+        target_dim = 3840
+        cap = 4096
+        mode_label = "4K Ultra"
+        jpeg_quality = 95
+    else: # 2k
+        target_dim = 1920
+        cap = 2560
+        mode_label = "2K HD"
+        jpeg_quality = 95
+
+    # Compute exact scale factor to reach desired dimension
+    scale = max(2, round(target_dim / max_orig))
+    new_w = min(orig_w * scale, cap)
+    new_h = min(orig_h * scale, cap)
     
     # 1. Edge-preserving Denoising
     denoised = cv2.bilateralFilter(img, d=7, sigmaColor=50, sigmaSpace=50)
     
-    # 2. High-Order Lanczos-4 Upscaling
-    if scale > 1:
-        upscaled = cv2.resize(denoised, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
-    else:
-        upscaled = denoised
-        new_w, new_h = orig_w, orig_h
+    # 2. High-Order Lanczos-4 Super-Resolution Upscaling
+    upscaled = cv2.resize(denoised, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
         
     # 3. Dynamic Unsharp Masking
     gaussian = cv2.GaussianBlur(upscaled, (0, 0), sigmaX=1.5, sigmaY=1.5)
@@ -69,7 +87,7 @@ def enhance_image(image_bytes: bytes, target_scale: int = 2) -> Tuple[bytes, Dic
     
     # Save as high-quality JPEG
     output_buf = io.BytesIO()
-    vibrant_img.save(output_buf, format="JPEG", quality=95, optimize=True)
+    vibrant_img.save(output_buf, format="JPEG", quality=jpeg_quality, optimize=True)
     enhanced_bytes = output_buf.getvalue()
     
     elapsed = time.time() - t0
@@ -79,6 +97,7 @@ def enhance_image(image_bytes: bytes, target_scale: int = 2) -> Tuple[bytes, Dic
         "new_width": new_w,
         "new_height": new_h,
         "scale": scale,
+        "mode": mode_label,
         "elapsed_seconds": round(elapsed, 2)
     }
     

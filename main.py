@@ -152,7 +152,7 @@ async def post_init(application: Application):
         BotCommand("song", "🎧 ស្វែងរកចម្រៀង MP3 (Music Finder)"),
         BotCommand("songchannel", "📻 ឃ្លាំងចម្រៀង Channel Storage"),
         BotCommand("pdf", "📄 Chat with PDF & សង្ខេបឯកសារ"),
-        BotCommand("enhance", "🔍 ធ្វើឱ្យរូបច្បាស់ HD (Super-Res)"),
+        BotCommand("enhance", "🔍 ធ្វើឱ្យរូបច្បាស់ 4K & 8K (Super-Res)"),
         BotCommand("watermark", "💧 ដាក់ Watermark ការពាររូបភាព"),
         BotCommand("welcome", "🖼️ Banner ស្វាគមន៍សមាជិក Group"),
         BotCommand("speak", "🗣️ អានជាសំឡេង (Text-to-Speech)"),
