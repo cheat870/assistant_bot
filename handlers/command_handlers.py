@@ -2209,8 +2209,9 @@ async def enhance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
         ])
 
+        photo_to_send = metrics.get("preview_bytes") or enhanced_bytes
         await update.message.reply_photo(
-            photo=io.BytesIO(enhanced_bytes),
+            photo=io.BytesIO(photo_to_send),
             caption=caption,
             reply_markup=buttons,
             parse_mode="Markdown"
@@ -3654,8 +3655,9 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                         ]
                     ])
 
+                    photo_to_send = metrics.get("preview_bytes") or enhanced_bytes
                     await query.message.reply_photo(
-                        photo=io.BytesIO(enhanced_bytes),
+                        photo=io.BytesIO(photo_to_send),
                         caption=caption,
                         reply_markup=buttons,
                         parse_mode="Markdown"
