@@ -3578,25 +3578,89 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             )
             await query.message.reply_text(msg, parse_mode="Markdown")
 
-        elif data == "btn_photo_enhance_help":
-            await query.answer()
-            msg = (
-                "🔍 *របៀបធ្វើឱ្យរូបភាពកាន់តែច្បាស់ (AI Image Enhancer)៖*\n\n"
-                "👉 ចុច **Reply** លើរូបភាពណាមួយ រួចវាយ `/enhance` ឬ `/upscale`\n"
-                "👉 ឬផ្ញើរូបភាពថ្មីដោយដាក់ Caption ថា `/enhance`\n\n"
-                "Bot នឹងជួយសម្អាត Noise, ពង្រីកទំហំ 2x-4x និងធ្វើឱ្យរូបភាពកាន់តែច្បាស់ភ្លាមៗ! ✨"
-            )
-            await query.message.reply_text(msg, parse_mode="Markdown")
+        elif data in ["btn_enhance_info", "btn_photo_enhance_help"]:
+            photos = query.message.photo if query.message else None
+            if photos:
+                await query.answer("🔍 កំពុងធ្វើឱ្យរូបភាពកាន់តែច្បាស់ HD (Upscaling)...")
+                status_msg = await query.message.reply_text("🔍 *កំពុងដំណើរការ Super-Resolution & សម្អាត Noise...* ⏳", parse_mode="Markdown")
+                await query.message.chat.send_action("upload_photo")
+                try:
+                    photo = photos[-1]
+                    tg_file = await context.bot.get_file(photo.file_id)
+                    img_bytes = bytes(await tg_file.download_as_bytearray())
+                    from services.image_enhancer_service import enhance_image
+                    enhanced_bytes, metrics = enhance_image(img_bytes)
 
-        elif data == "btn_photo_watermark_help":
-            await query.answer()
-            msg = (
-                "💧 *របៀបបោះត្រា Watermark ការពាររូបភាពផលិតផល៖*\n\n"
-                "👉 ចុច **Reply** លើរូបភាពណាមួយ រួចវាយ `/watermark <ឈ្មោះហាង លេខទូរស័ព្ទ>`\n"
-                "👉 ឧទាហរណ៍៖ `/watermark ហាង ពិសិដ្ឋ 012 345 678`\n\n"
-                "Bot នឹងបោះត្រាស្អាតៗកម្រិត Professional ការពារគេលួចចម្លងរូបភាព! 🛡️"
-            )
-            await query.message.reply_text(msg, parse_mode="Markdown")
+                    import io
+                    caption = (
+                        f"✨ *រូបភាពត្រូវបានបង្កើនគុណភាព HD (Upscale 2x) រួចរាល់!* 🔍\n\n"
+                        f"📐 *ទំហំដើម:* `{metrics['orig_width']} x {metrics['orig_height']}` px\n"
+                        f"📈 *ទំហំថ្មី (HD):* `{metrics['new_width']} x {metrics['new_height']}` px (+{metrics['scale']}x)\n"
+                        f"⚡ *រយៈពេលដំណើរការ:* `{metrics['elapsed_seconds']}s`"
+                    )
+                    await query.message.reply_photo(
+                        photo=io.BytesIO(enhanced_bytes),
+                        caption=caption,
+                        parse_mode="Markdown"
+                    )
+                    try:
+                        await status_msg.delete()
+                    except Exception:
+                        pass
+                except Exception as e_enh:
+                    logger.error(f"Error enhancing image from button: {e_enh}")
+                    await safe_edit_text(status_msg, f"❌ មិនអាចបង្កើនគុណភាពរូបភាពបានទេ៖ {str(e_enh)[:100]}")
+            else:
+                await query.answer()
+                msg = (
+                    "🔍 *របៀបធ្វើឱ្យរូបភាពកាន់តែច្បាស់ (AI Image Enhancer)៖*\n\n"
+                    "👉 ចុច **Reply** លើរូបភាពណាមួយ រួចវាយ `/enhance` ឬ `/upscale`\n"
+                    "👉 ឬផ្ញើរូបភាពថ្មីដោយដាក់ Caption ថា `/enhance`\n\n"
+                    "Bot នឹងជួយសម្អាត Noise, ពង្រីកទំហំ 2x-4x និងធ្វើឱ្យរូបភាពកាន់តែច្បាស់ភ្លាមៗ! ✨"
+                )
+                await query.message.reply_text(msg, parse_mode="Markdown")
+
+        elif data in ["btn_watermark_info", "btn_photo_watermark_help"]:
+            photos = query.message.photo if query.message else None
+            if photos:
+                wm_text = user.first_name if user and user.first_name else "Smart Assistant"
+                await query.answer(f"💧 កំពុងបោះត្រា '{wm_text}'...")
+                status_msg = await query.message.reply_text(f"💧 *កំពុងបោះត្រា Watermark '{wm_text}' លើរូបភាព...* ⏳", parse_mode="Markdown")
+                await query.message.chat.send_action("upload_photo")
+                try:
+                    photo = photos[-1]
+                    tg_file = await context.bot.get_file(photo.file_id)
+                    img_bytes = bytes(await tg_file.download_as_bytearray())
+                    from services.watermark_service import apply_watermark
+                    watermarked_bytes = apply_watermark(img_bytes, text=wm_text)
+
+                    import io
+                    caption = (
+                        f"🛡️ *រូបភាពរបស់អ្នកត្រូវបានបោះត្រាការពារដោយជោគជ័យ!* ✨\n"
+                        f"🏷️ _Watermark: {wm_text}_\n\n"
+                        f"💡 _ប្រសិនបើចង់ប្ដូរឈ្មោះហាង ឬលេខទូរស័ព្ទផ្សេង សូមចុច Reply លើរូប រួចវាយ `/watermark <ឈ្មោះហាង>`_"
+                    )
+                    await query.message.reply_photo(
+                        photo=io.BytesIO(watermarked_bytes),
+                        caption=caption,
+                        parse_mode="Markdown"
+                    )
+                    try:
+                        await status_msg.delete()
+                    except Exception:
+                        pass
+                except Exception as e_wm:
+                    logger.error(f"Error watermarking image from button: {e_wm}")
+                    await safe_edit_text(status_msg, f"❌ មិនអាចបោះត្រាលើរូបភាពបានទេ៖ {str(e_wm)[:100]}")
+            else:
+                await query.answer()
+                msg = (
+                    "💧 *របៀបបោះត្រា Watermark ការពាររូបភាពផលិតផល៖*\n\n"
+                    "👉 ចុច **Reply** លើរូបភាពណាមួយ រួចវាយ `/watermark <ឈ្មោះហាង លេខទូរស័ព្ទ>`\n"
+                    "👉 ឧទាហរណ៍៖ `/watermark ហាង ពិសិដ្ឋ 012 345 678`\n\n"
+                    "Bot នឹងបោះត្រាស្អាតៗកម្រិត Professional ការពារគេលួចចម្លងរូបភាព! 🛡️"
+                )
+                await query.message.reply_text(msg, parse_mode="Markdown")
 
         elif data == "btn_photo_rembg_help":
             await query.answer()
@@ -3826,11 +3890,20 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         elif data == "btn_back_main":
             await query.answer()
             first_name = user.first_name if user else "លោកអ្នក"
-            await query.edit_message_text(
-                get_welcome_text(first_name),
-                reply_markup=get_main_menu_keyboard(chat_id),
-                parse_mode="Markdown"
-            )
+            try:
+                await query.edit_message_text(
+                    get_welcome_text(first_name),
+                    reply_markup=get_main_menu_keyboard(chat_id),
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                # If editing text fails (e.g. on a photo/media message), send fresh main menu
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=get_welcome_text(first_name),
+                    reply_markup=get_main_menu_keyboard(chat_id),
+                    parse_mode="Markdown"
+                )
 
         elif data == "btn_clean_chat":
             chat_id = query.message.chat_id if query.message else update.effective_chat.id
