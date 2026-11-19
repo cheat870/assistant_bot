@@ -27,7 +27,7 @@ from telegram.ext import (
 )
 from telegram.request import HTTPXRequest
 
-from config import BOT_TOKEN
+from config import BOT_TOKEN, LOCAL_BOT_API_URL
 from database import init_db
 from services.scheduler import setup_scheduler
 from services.health_server import start_health_server
@@ -99,6 +99,13 @@ from handlers.command_handlers import (
     songchannel_command,
     clearsongchannel_command,
     button_callback_handler,
+    imagine_command,
+    summarize_command,
+    sub_command,
+    playlist_command,
+    trim_command,
+    gif_command,
+    botserver_command,
 )
 from handlers.video_handlers import handle_video_message, handle_media_download_callback
 
@@ -125,6 +132,13 @@ async def post_init(application: Application):
     """Register official commands in Telegram native menu button."""
     commands = [
         BotCommand("start", "🏠 ផ្ទាំង Dashboard មេ (Main Menu)"),
+        BotCommand("imagine", "🎨 បង្កើតរូបភាព AI (FLUX Art)"),
+        BotCommand("summarize", "📝 សង្ខេបវីដេអូ YouTube AI"),
+        BotCommand("sub", "📑 ទាញយក Subtitle ខ្មែរ (.srt)"),
+        BotCommand("playlist", "🎧 ទាញយក YouTube Playlist ទាំងកញ្ចប់"),
+        BotCommand("trim", "✂️ កាត់វីដេអូក្នុង Chat (Video Trimmer)"),
+        BotCommand("gif", "🎞️ បម្លែងវីដេអូទៅជា GIF (GIF Maker)"),
+        BotCommand("botserver", "🖥️ Local Bot API Server (2GB Upload)"),
         BotCommand("briefing", "👑 សង្ខេបពេលព្រឹក VIP (Morning Briefing)"),
         BotCommand("compress", "🗜️ បង្រួម & បម្លែងឯកសារ (File Master)"),
         BotCommand("budget", "📊 ចំណូល-ចំណាយ (Expense Tracker)"),
@@ -195,13 +209,16 @@ def main():
         write_timeout=900.0,
         pool_timeout=60.0,
     )
-    app = (
+    builder = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
         .request(request_config)
         .post_init(post_init)
-        .build()
     )
+    if LOCAL_BOT_API_URL:
+        builder = builder.base_url(f"{LOCAL_BOT_API_URL}/bot").base_file_url(f"{LOCAL_BOT_API_URL}/file/bot")
+        logger.info(f"Custom Local Bot API Server active: {LOCAL_BOT_API_URL} (Max upload: 2,000 MB)")
+    app = builder.build()
     
     # Register Core Command Handlers
     app.add_handler(CommandHandler("start", start_command, block=False))
@@ -309,9 +326,24 @@ def main():
     app.add_handler(CommandHandler("caption", content_command, block=False))
     app.add_handler(CommandHandler("post", content_command, block=False))
     app.add_handler(CommandHandler("script", content_command, block=False))
+
+    # Media Superpowers (Trimmer, GIF, Subtitles, Playlist, 2GB Local API)
+    app.add_handler(CommandHandler("trim", trim_command, block=False))
+    app.add_handler(CommandHandler("cut", trim_command, block=False))
+    app.add_handler(CommandHandler("gif", gif_command, block=False))
+    app.add_handler(CommandHandler("sub", sub_command, block=False))
+    app.add_handler(CommandHandler("subtitle", sub_command, block=False))
+    app.add_handler(CommandHandler("playlist", playlist_command, block=False))
+    app.add_handler(CommandHandler("botserver", botserver_command, block=False))
+
+    # AI Next-Gen (FLUX Image Generation, YouTube Summarizer)
+    app.add_handler(CommandHandler("imagine", imagine_command, block=False))
+    app.add_handler(CommandHandler("draw", imagine_command, block=False))
+    app.add_handler(CommandHandler("summarize", summarize_command, block=False))
+    app.add_handler(CommandHandler("sum", summarize_command, block=False))
     
     # Register Callback Query Handlers for Media Downloads & Buttons
-    app.add_handler(CallbackQueryHandler(handle_media_download_callback, pattern="^(dlmp3_|dlthumb_|dlqual_)", block=False))
+    app.add_handler(CallbackQueryHandler(handle_media_download_callback, pattern="^(dlmp3_|dlthumb_|dlqual_|dlsum_|dlsub_)", block=False))
     app.add_handler(CallbackQueryHandler(button_callback_handler, block=False))
 
     # Register Location Handler for GPS Location Sharing

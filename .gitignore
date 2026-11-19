@@ -13,6 +13,7 @@ downloads/
 *.m4a
 *.webm
 *.bin
+*.zip
 
 # Python cache
 __pycache__/

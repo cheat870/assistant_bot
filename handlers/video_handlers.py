@@ -394,12 +394,16 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 cleanup_file(p)
         return
         
-    # Build buttons for MP3, HD Cover, 1080p, 4K, 8K, and direct web link
+    # Build buttons for MP3, HD Cover, 1080p, 4K, 8K, AI Summary, Subtitles, and direct web link
     buttons = [
         [
             InlineKeyboardButton("💎 1080p FHD", callback_data=f"dlqual_{token}_1080p"),
             InlineKeyboardButton("🔥 4K / Best", callback_data=f"dlqual_{token}_4k"),
             InlineKeyboardButton("🌌 8K Ultra", callback_data=f"dlqual_{token}_8k"),
+        ],
+        [
+            InlineKeyboardButton("📝 សង្ខេប AI", callback_data=f"dlsum_{token}"),
+            InlineKeyboardButton("📑 Subtitle ខ្មែរ", callback_data=f"dlsub_{token}"),
         ],
         [
             InlineKeyboardButton("🎵 ទាញយកជា MP3", callback_data=f"dlmp3_{token}"),
@@ -496,7 +500,7 @@ async def handle_media_download_callback(update: Update, context: ContextTypes.D
         return False
         
     data = query.data
-    if not (data.startswith("dlmp3_") or data.startswith("dlthumb_") or data.startswith("dlqual_")):
+    if not (data.startswith("dlmp3_") or data.startswith("dlthumb_") or data.startswith("dlqual_") or data.startswith("dlsum_") or data.startswith("dlsub_")):
         return False
 
     # IMMEDIATELY answer callback to dismiss client spinner instantly!
@@ -580,6 +584,69 @@ async def handle_media_download_callback(update: Update, context: ContextTypes.D
                 await chat.send_message(f"❌ កំហុសក្នុងការផ្ញើសំឡេង៖ {str(e)[:100]}")
             finally:
                 cleanup_file(res.file_path)
+            return True
+
+        elif data.startswith("dlsum_"):
+            token = data.replace("dlsum_", "")
+            url = resolve_media_url(token, query)
+            if not url:
+                await chat.send_message("❌ Link វីដេអូបានផុតកំណត់ហើយ សូមផ្ញើ Link ម្តងទៀតណា៎។")
+                return True
+
+            status_m = await chat.send_message("🧠 *AI កំពុងទាញយក Transcript និងសង្ខេបវីដេអូ...* សូមរង់ចាំបន្តិច 🚀", parse_mode="Markdown")
+            await chat.send_action("typing")
+
+            from services.summarizer_service import summarize_video_ai
+            summary_res = await summarize_video_ai(url)
+            try:
+                await status_m.edit_text(summary_res, parse_mode="Markdown")
+            except Exception:
+                await chat.send_message(summary_res)
+                try:
+                    await status_m.delete()
+                except Exception:
+                    pass
+            return True
+
+        elif data.startswith("dlsub_"):
+            token = data.replace("dlsub_", "")
+            url = resolve_media_url(token, query)
+            if not url:
+                await chat.send_message("❌ Link វីដេអូបានផុតកំណត់ហើយ សូមផ្ញើ Link ម្តងទៀតណា៎។")
+                return True
+
+            status_m = await chat.send_message("📑 *កំពុងទាញយក និងបកប្រែ Subtitle ជាភាសាខ្មែរ...* 🚀", parse_mode="Markdown")
+            await chat.send_action("typing")
+
+            from services.subtitle_service import generate_khmer_subtitles
+            sub_res = await generate_khmer_subtitles(url)
+            if not sub_res.get("success"):
+                await status_m.edit_text(f"❌ បរាជ័យ៖ {sub_res.get('error')}")
+                return True
+
+            file_path = sub_res["file_path"]
+            caption = (
+                f"📑 *ចំណងជើងរងជាភាសាខ្មែរ (Khmer Subtitles)* ✨\n\n"
+                f"🎬 *វីដេអូ:* {sub_res['title'][:50]}\n"
+                f"🔢 *ចំនួនឃ្លា:* {sub_res['cues_count']} ឃ្លា\n\n"
+                f"📝 *គំរូ Subtitle ដើមវីដេអូ៖*\n{sub_res['preview_text']}\n\n"
+                f"✨ បកប្រែដោយ Smart Assistant Bot 🚀"
+            )
+
+            with open(file_path, "rb") as srt_file:
+                await chat.send_document(
+                    document=srt_file,
+                    filename=sub_res["filename"],
+                    caption=caption,
+                    parse_mode="Markdown"
+                )
+
+            try:
+                await status_m.delete()
+            except Exception:
+                pass
+
+            cleanup_file(file_path)
             return True
 
         elif data.startswith("dlthumb_"):

@@ -3071,8 +3071,8 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     chat_id = query.message.chat_id
     user = query.from_user
 
-    # Delegate media download callbacks (MP3, HD Cover, 1080p, 4K)
-    if data.startswith("dlmp3_") or data.startswith("dlthumb_") or data.startswith("dlqual_"):
+    # Delegate media download callbacks (MP3, HD Cover, 1080p, 4K, 8K, AI Summary, Subtitles)
+    if data.startswith("dlmp3_") or data.startswith("dlthumb_") or data.startswith("dlqual_") or data.startswith("dlsum_") or data.startswith("dlsub_"):
         from handlers.video_handlers import handle_media_download_callback
         handled = await handle_media_download_callback(update, context)
         if handled:
@@ -4039,3 +4039,370 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             await query.answer()
         except Exception:
             pass
+
+# -------------------------------------------------------------
+# V6 Media Superpowers & AI Next-Gen Command Handlers
+# -------------------------------------------------------------
+
+async def imagine_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate high-resolution AI art from prompt: /imagine <prompt>."""
+    prompt = " ".join(context.args) if context.args else ""
+    if not prompt and update.message and update.message.reply_to_message:
+        prompt = update.message.reply_to_message.text or update.message.reply_to_message.caption or ""
+
+    if not prompt:
+        tip = (
+            "🎨 *[AI Image Generator - បង្កើតរូបភាព AI]* ✨\n\n"
+            "សូមវាយ៖ `/imagine <ពិពណ៌នារូបភាពដែលអ្នកចង់បាន>`\n\n"
+            "• ឧទាហរណ៍៖ `/imagine រថយន្តទំនើបបើកកាត់ប្រាសាទអង្គរវត្តពេលថ្ងៃលិច`\n"
+            "• ឧទាហរណ៍៖ `/imagine cute anime girl reading book in cozy coffee shop 4k cinematic`\n"
+            "• ឧទាហរណ៍៖ `/imagine នាគរាជខ្មែរហោះលើផ្ទៃមេឃពណ៌មាស`\n\n"
+            "💡 _គាំទ្រទាំងភាសាខ្មែរ និងអង់គ្លេស ដោយប្រើម៉ូដែល FLUX.1 Ultra HD ឥតគិតថ្លៃ!_ 🚀"
+        )
+        await safe_reply_text(update.message, tip)
+        return
+
+    status_msg = await update.message.reply_text(
+        f"🎨 *AI កំពុងបង្កើតរូបភាពតាមការពិពណ៌នារបស់អ្នក...*\n"
+        f"💡 _\"{prompt[:60]}...\"_\n\n"
+        f"សូមរង់ចាំប្រហែល ៥ ទៅ ១០ វិនាទី! 🚀",
+        parse_mode="Markdown"
+    )
+    await update.message.chat.send_action("upload_photo")
+
+    try:
+        from services.imagine_service import generate_ai_image
+        img_bytes, orig_p, exp_p = await generate_ai_image(prompt)
+        if not img_bytes:
+            await safe_edit_text(status_msg, "❌ បរាជ័យក្នុងការបង្កើតរូបភាព។ សូមសាកល្បងផ្លាស់ប្តូរពាក្យពិពណ៌នា (Prompt) ម្តងទៀត។")
+            return
+
+        import io
+        img_io = io.BytesIO(img_bytes)
+        img_io.name = "generated_ai_art.jpg"
+
+        caption = (
+            f"🎨 *រូបភាព AI បង្កើតបានសម្រេច!* ✨\n\n"
+            f"📝 *Prompt ដើម:* `{orig_p[:100]}`\n"
+            f"🔍 *Enhanced Prompt:* _{exp_p[:140]}_\n\n"
+            f"✨ បង្កើតដោយ Smart Assistant Bot 🚀"
+        )
+
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔍 ធ្វើឱ្យច្បាស់ (Upscale)", callback_data="btn_enhance_info")],
+            [InlineKeyboardButton("💧 ដាក់ Watermark", callback_data="btn_watermark_info")],
+            [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+        ])
+
+        await update.message.reply_photo(
+            photo=img_io,
+            caption=caption,
+            reply_markup=buttons,
+            parse_mode="Markdown"
+        )
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+    except Exception as e:
+        logger.error(f"Error in imagine command: {e}")
+        await safe_edit_text(status_msg, f"❌ កំហុសបច្ចេកទេសក្នុងការបង្កើតរូបភាព៖ {str(e)[:120]}")
+
+async def summarize_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Summarize long YouTube video/podcast into Khmer takeaways: /summarize <url>."""
+    url = " ".join(context.args) if context.args else ""
+    if not url and update.message and update.message.reply_to_message:
+        candidate = update.message.reply_to_message.text or update.message.reply_to_message.caption or ""
+        from services.video_downloader import extract_video_url
+        url = extract_video_url(candidate) or ""
+
+    if not url:
+        from services.video_downloader import extract_video_url
+        url = extract_video_url(update.message.text or "") or ""
+
+    if not url:
+        tip = (
+            "📝 *[YouTube AI Video Summarizer - សង្ខេបវីដេអូ]* ✨\n\n"
+            "ជួយសន្សំពេលវេលាដោយមិនបាច់មើលវីដេអូរាប់ម៉ោង! AI នឹងស្ដាប់ និងសង្ខេបចំណុចសំខាន់ៗជាភាសាខ្មែរជូនភ្លាមៗ!\n\n"
+            "👉 *របៀបប្រើប្រាស់៖*\n"
+            "`/summarize <Link វីដេអូ YouTube>`\n\n"
+            "• ឧទាហរណ៍៖ `/summarize https://www.youtube.com/watch?v=...`\n"
+            "💡 _ឬគ្រាន់តែ Reply លើ Link វីដេអូ ដោយវាយពាក្យ:_ `/summarize`"
+        )
+        await safe_reply_text(update.message, tip)
+        return
+
+    status_msg = await update.message.reply_text(
+        "🧠 *AI កំពុងទាញយក Transcript និងវិភាគខ្លឹមសារវីដេអូ...*\n"
+        "សូមរង់ចាំប្រហែល ៥ ទៅ ១០ វិនាទី! 🚀",
+        parse_mode="Markdown"
+    )
+    await update.message.chat.send_action("typing")
+
+    try:
+        from services.summarizer_service import summarize_video_ai
+        summary_result = await summarize_video_ai(url)
+        await safe_edit_text(status_msg, summary_result)
+    except Exception as e:
+        logger.error(f"Error in summarize command: {e}")
+        await safe_edit_text(status_msg, f"❌ កំហុសក្នុងការសង្ខេបវីដេអូ៖ {str(e)[:120]}")
+
+async def sub_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Download video subtitles and translate to Khmer (.srt file): /sub <url>."""
+    url = " ".join(context.args) if context.args else ""
+    if not url and update.message and update.message.reply_to_message:
+        candidate = update.message.reply_to_message.text or update.message.reply_to_message.caption or ""
+        from services.video_downloader import extract_video_url
+        url = extract_video_url(candidate) or ""
+
+    if not url:
+        from services.video_downloader import extract_video_url
+        url = extract_video_url(update.message.text or "") or ""
+
+    if not url:
+        tip = (
+            "📑 *[Auto-Subtitles & Khmer Translation - ចំណងជើងរង]* ✨\n\n"
+            "ទាញយក Subtitle ពី YouTube រួចបកប្រែជាភាសាខ្មែរ និងបង្កើតជា File `.srt` សម្រាប់យកទៅមើលជាមួយវីដេអូបានភ្លាមៗ!\n\n"
+            "👉 *របៀបប្រើប្រាស់៖*\n"
+            "`/sub <Link វីដេអូ YouTube>`\n\n"
+            "• ឧទាហរណ៍៖ `/sub https://www.youtube.com/watch?v=...`\n"
+            "💡 _ឬ Reply លើ Link វីដេអូ ដោយវាយពាក្យ:_ `/sub`"
+        )
+        await safe_reply_text(update.message, tip)
+        return
+
+    status_msg = await update.message.reply_text(
+        "📑 *កំពុងទាញយក Subtitles និងប្រើប្រាស់ AI បកប្រែជាភាសាខ្មែរ...*\n"
+        "សូមរង់ចាំបន្តិចណា៎! 🚀",
+        parse_mode="Markdown"
+    )
+    await update.message.chat.send_action("typing")
+
+    try:
+        from services.subtitle_service import generate_khmer_subtitles
+        sub_res = await generate_khmer_subtitles(url)
+        if not sub_res.get("success"):
+            await safe_edit_text(status_msg, f"❌ បរាជ័យ៖ {sub_res.get('error')}")
+            return
+
+        file_path = sub_res["file_path"]
+        caption = (
+            f"📑 *ចំណងជើងរងជាភាសាខ្មែរ (Khmer Subtitles)* ✨\n\n"
+            f"🎬 *វីដេអូ:* {sub_res['title'][:50]}\n"
+            f"🔢 *ចំនួនឃ្លា:* {sub_res['cues_count']} ឃ្លា\n\n"
+            f"📝 *គំរូ Subtitle ដើមវីដេអូ៖*\n{sub_res['preview_text']}\n\n"
+            f"✨ បកប្រែដោយ Smart Assistant Bot 🚀"
+        )
+
+        with open(file_path, "rb") as srt_file:
+            await update.message.reply_document(
+                document=srt_file,
+                filename=sub_res["filename"],
+                caption=caption,
+                parse_mode="Markdown"
+            )
+
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+        from services.video_downloader import cleanup_file
+        cleanup_file(file_path)
+
+    except Exception as e:
+        logger.error(f"Error in sub command: {e}")
+        await safe_edit_text(status_msg, f"❌ កំហុសក្នុងការទាញយក Subtitle៖ {str(e)[:120]}")
+
+async def playlist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Download entire YouTube playlist batch as MP3 & auto-archive to @Song182: /playlist <url>."""
+    url = " ".join(context.args) if context.args else ""
+    if not url and update.message and update.message.reply_to_message:
+        candidate = update.message.reply_to_message.text or update.message.reply_to_message.caption or ""
+        from services.video_downloader import extract_video_url
+        url = extract_video_url(candidate) or ""
+
+    if not url:
+        tip = (
+            "🎧 *[Playlist Batch Downloader - ទាញយកចម្រៀងទាំងកញ្ចប់]* 🎶\n\n"
+            "ទាញយកបទចម្រៀងទាំងអស់ក្នុង YouTube Playlist មួយ ជា File MP3 320kbps និង Upload រក្សាទុកក្នុង Channel `@Song182` ដោយស្វ័យប្រវត្តិ!\n\n"
+            "👉 *របៀបប្រើប្រាស់៖*\n"
+            "`/playlist <Link YouTube Playlist>`\n\n"
+            "• ឧទាហរណ៍៖ `/playlist https://www.youtube.com/playlist?list=...`\n"
+            "💡 _កំណត់ទាញយកអតិបរមា ១០ ទៅ ១៥ បទក្នុងពេលតែមួយ ដើម្បីការពារកុំឱ្យជាប់ Spam Telegram!_"
+        )
+        await safe_reply_text(update.message, tip)
+        return
+
+    status_msg = await update.message.reply_text(
+        "⏳ *កំពុងទាញយកព័ត៌មាន Playlist... សូមរង់ចាំបន្តិចណា៎!* 🎶",
+        parse_mode="Markdown"
+    )
+    await update.message.chat.send_action("typing")
+
+    try:
+        from services.playlist_service import process_and_archive_playlist
+        await process_and_archive_playlist(
+            bot=context.bot,
+            chat_id=update.effective_chat.id,
+            user=update.effective_user,
+            playlist_url=url,
+            status_msg=status_msg,
+            max_items=10
+        )
+    except Exception as e:
+        logger.error(f"Error in playlist command: {e}")
+        await safe_edit_text(status_msg, f"❌ កំហុសក្នុងការទាញយក Playlist៖ {str(e)[:120]}")
+
+async def trim_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Trim video by replying to a video message: /trim <start> <end> (e.g. /trim 00:10 00:45)."""
+    reply_msg = update.message.reply_to_message if update.message else None
+    if not reply_msg or not (reply_msg.video or reply_msg.animation or reply_msg.document):
+        tip = (
+            "✂️ *[Video Trimmer - កាត់វីដេអូក្នុង Chat]* 🎬\n\n"
+            "សូមធ្វើការ **Reply លើវីដេអូណាមួយ** រួចវាយបញ្ជា៖\n"
+            "`/trim <ម៉ោងចាប់ផ្ដើម> <ម៉ោងបញ្ចប់>`\n\n"
+            "• ឧទាហរណ៍៖ `/trim 00:10 00:35` (កាត់ពីវិនាទី ១០ ដល់ ៣៥)\n"
+            "• ឧទាហរណ៍៖ `/trim 1:15 2:00` (កាត់ពីនាទី ១:១៥ ដល់ ២:០០)\n"
+            "• ឧទាហរណ៍៖ `/trim 5 25` (កាត់ពីវិនាទី ៥ ដល់ ២៥)\n\n"
+            "💡 _ចំណាំ៖ រយៈពេលកាត់អតិបរមាត្រឹម ៥ នាទី។_"
+        )
+        await safe_reply_text(update.message, tip)
+        return
+
+    args = context.args or []
+    if len(args) < 2:
+        await safe_reply_text(update.message, "⚠️ សូមបញ្ជាក់ម៉ោងចាប់ផ្ដើម និងម៉ោងបញ្ចប់! ឧ. `/trim 00:10 00:45`")
+        return
+
+    start_t, end_t = args[0], args[1]
+    status_msg = await update.message.reply_text(
+        f"✂️ *កំពុងទាញយក និងកាត់វីដេអូពី {start_t} ដល់ {end_t}...*\n"
+        f"សូមរង់ចាំបន្តិចណា៎! 🚀",
+        parse_mode="Markdown"
+    )
+    await update.message.chat.send_action("upload_video")
+
+    from config import DOWNLOAD_DIR
+    import uuid
+    from services.video_downloader import cleanup_file
+
+    media_obj = reply_msg.video or reply_msg.animation or reply_msg.document
+    unique_id = uuid.uuid4().hex[:8]
+    temp_in = DOWNLOAD_DIR / f"raw_trim_{unique_id}.mp4"
+
+    try:
+        tg_file = await context.bot.get_file(media_obj.file_id)
+        await tg_file.download_to_drive(str(temp_in))
+
+        from services.video_editor_service import trim_video
+        out_path, err = trim_video(str(temp_in), start_t, end_t)
+        if err or not out_path or not os.path.exists(out_path):
+            await safe_edit_text(status_msg, f"❌ បរាជ័យក្នុងការកាត់វីដេអូ៖ {err}")
+            return
+
+        with open(out_path, "rb") as vf:
+            await update.message.reply_video(
+                video=vf,
+                caption=f"✂️ *វីដេអូកាត់រួចរាល់ ({start_t} ➔ {end_t})* ✨\n\n✨ កាត់ដោយ Smart Assistant Bot 🚀",
+                parse_mode="Markdown"
+            )
+
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+        cleanup_file(out_path)
+    except Exception as e:
+        logger.error(f"Error trimming video: {e}")
+        await safe_edit_text(status_msg, f"❌ កំហុសបច្ចេកទេស៖ {str(e)[:120]}")
+    finally:
+        cleanup_file(str(temp_in))
+
+async def gif_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Convert a video clip to an animated looping GIF: reply with /gif."""
+    reply_msg = update.message.reply_to_message if update.message else None
+    if not reply_msg or not (reply_msg.video or reply_msg.animation or reply_msg.document):
+        tip = (
+            "🎞️ *[GIF Maker - បម្លែងវីដេអូទៅជា GIF]* ✨\n\n"
+            "សូមធ្វើការ **Reply លើវីដេអូណាមួយ** រួចវាយបញ្ជា៖\n"
+            "`/gif`\n\n"
+            "Bot នឹងបម្លែងវីដេអូនោះទៅជា Animated Looping GIF គុណភាពខ្ពស់ គ្មានសំឡេង សម្រាប់ផ្ញើលេងក្នុង Telegram បានភ្លាមៗ! 🚀"
+        )
+        await safe_reply_text(update.message, tip)
+        return
+
+    status_msg = await update.message.reply_text(
+        "🎞️ *កំពុងបម្លែងវីដេអូទៅជា Animated GIF...*\n"
+        "សូមរង់ចាំបន្តិចណា៎! 🚀",
+        parse_mode="Markdown"
+    )
+    await update.message.chat.send_action("upload_video")
+
+    from config import DOWNLOAD_DIR
+    import uuid
+    from services.video_downloader import cleanup_file
+
+    media_obj = reply_msg.video or reply_msg.animation or reply_msg.document
+    unique_id = uuid.uuid4().hex[:8]
+    temp_in = DOWNLOAD_DIR / f"raw_gif_{unique_id}.mp4"
+
+    try:
+        tg_file = await context.bot.get_file(media_obj.file_id)
+        await tg_file.download_to_drive(str(temp_in))
+
+        from services.video_editor_service import convert_video_to_gif
+        out_path, err = convert_video_to_gif(str(temp_in), max_duration=15)
+        if err or not out_path or not os.path.exists(out_path):
+            await safe_edit_text(status_msg, f"❌ បរាជ័យក្នុងការបម្លែងជា GIF៖ {err}")
+            return
+
+        with open(out_path, "rb") as gf:
+            await update.message.reply_animation(
+                animation=gf,
+                caption="🎞️ *បានបម្លែងជា Animated GIF រួចរាល់!* ✨\n\n✨ Smart Assistant Bot 🚀",
+                parse_mode="Markdown"
+            )
+
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+        cleanup_file(out_path)
+    except Exception as e:
+        logger.error(f"Error converting to gif: {e}")
+        await safe_edit_text(status_msg, f"❌ កំហុសបច្ចេកទេស៖ {str(e)[:120]}")
+    finally:
+        cleanup_file(str(temp_in))
+
+async def botserver_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Guide on how to configure and run Telegram Local Bot API Server for 2GB uploads."""
+    from config import LOCAL_BOT_API_URL, MAX_FILE_SIZE_MB
+    status = f"✅ កំពុងដំណើរការ: `{LOCAL_BOT_API_URL}` (ដែនកំណត់: {MAX_FILE_SIZE_MB} MB)" if LOCAL_BOT_API_URL else "⚠️ បច្ចុប្បន្នប្រើ Telegram Cloud Bot API ផ្លូវការ (ដែនកំណត់: 50 MB)"
+
+    guide = (
+        "🖥️ *[Telegram Local Bot API Server - ផ្ញើ File បានដល់ 2 GB]* 🚀\n\n"
+        f"📊 *ស្ថានភាពបច្ចុប្បន្ន៖* {status}\n\n"
+        "💡 *តើអ្វីជា Local Bot API Server?*\n"
+        "Telegram អនុញ្ញាតឱ្យយើង Run Server Bot API ដោយខ្លួនឯង (Self-hosted)។ នៅពេលប្រើ Local Bot API Server នោះ Bot នឹងអាច៖\n"
+        "• 📤 Upload វីដេអូ 4K & 8K បានទំហំរហូតដល់ **2,000 MB (2 GB)** ផ្ទាល់ក្នុង Chat!\n"
+        "• ⚡ ល្បឿន Upload/Download លឿនជាងមុនទ្វេដង (Local Loopback)\n\n"
+        "🐳 *របៀប Run តាម Docker (ត្រឹមតែ ១ បន្ទាត់):*\n"
+        "```bash\n"
+        "docker run -d -p 8081:8081 --name telegram-bot-api \\\n"
+        "  -v /var/lib/telegram-bot-api:/var/lib/telegram-bot-api \\\n"
+        "  aiogram/telegram-bot-api:latest \\\n"
+        "  --api-id=<YOUR_TELEGRAM_API_ID> \\\n"
+        "  --api-hash=<YOUR_TELEGRAM_API_HASH> \\\n"
+        "  --local\n"
+        "```\n\n"
+        "⚙️ *ការភ្ជាប់ជាមួយ Bot នេះ៖*\n"
+        "គ្រាន់តែបើក file `.env` រួចបន្ថែម៖\n"
+        "`LOCAL_BOT_API_URL=\"http://localhost:8081\"`\n\n"
+        "Bot នឹងដំណើរការទាញយក និងផ្ញើវីដេអូកម្រិត 4K/8K ដល់ទំហំ 2GB ដោយស្វ័យប្រវត្តិ! ✨"
+    )
+    await safe_reply_text(update.message, guide)
+

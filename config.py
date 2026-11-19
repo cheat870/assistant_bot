@@ -37,8 +37,9 @@ AUTO_CLEAN_MORNING_MINUTE = int(os.getenv("AUTO_CLEAN_MORNING_MINUTE", "0"))
 AUTO_CLEAN_NOON_HOUR = int(os.getenv("AUTO_CLEAN_NOON_HOUR", "12"))
 AUTO_CLEAN_NOON_MINUTE = int(os.getenv("AUTO_CLEAN_NOON_MINUTE", "0"))
 
-# File size limits (Telegram bot upload limit is typically 50 MB)
-MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
+# File size limits (Telegram bot upload limit is typically 50 MB, or 2000 MB with Local Bot API)
+LOCAL_BOT_API_URL = os.getenv("LOCAL_BOT_API_URL", "").strip().rstrip("/")
+MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "2000" if LOCAL_BOT_API_URL else "50"))
 
 # Music Archive Storage Channel ID / Username (e.g. @Song182 or -1003994142170)
 MUSIC_CHANNEL_ID = os.getenv("MUSIC_CHANNEL_ID") or os.getenv("SONG_CHANNEL_ID") or "-1003994142170"
