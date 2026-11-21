@@ -31,11 +31,14 @@ ALERT_MINUTE = int(os.getenv("ALERT_MINUTE", "0"))
 WEATHER_ALERT_HOUR = int(os.getenv("WEATHER_ALERT_HOUR", "5"))
 WEATHER_ALERT_MINUTE = int(os.getenv("WEATHER_ALERT_MINUTE", "0"))
 
-# Auto-Clean History Scheduled Times (Default: 3:00 AM & 12:00 PM Cambodia Time)
-AUTO_CLEAN_MORNING_HOUR = int(os.getenv("AUTO_CLEAN_MORNING_HOUR", "3"))
-AUTO_CLEAN_MORNING_MINUTE = int(os.getenv("AUTO_CLEAN_MORNING_MINUTE", "0"))
+# Auto-Clean History Scheduled Times (Default: 12:00 PM Noon & 12:00 AM Midnight Cambodia Time)
+AUTO_CLEAN_MIDNIGHT_HOUR = int(os.getenv("AUTO_CLEAN_MIDNIGHT_HOUR", "0"))
+AUTO_CLEAN_MIDNIGHT_MINUTE = int(os.getenv("AUTO_CLEAN_MIDNIGHT_MINUTE", "0"))
 AUTO_CLEAN_NOON_HOUR = int(os.getenv("AUTO_CLEAN_NOON_HOUR", "12"))
 AUTO_CLEAN_NOON_MINUTE = int(os.getenv("AUTO_CLEAN_NOON_MINUTE", "0"))
+# Backward compatibility aliases
+AUTO_CLEAN_MORNING_HOUR = AUTO_CLEAN_MIDNIGHT_HOUR
+AUTO_CLEAN_MORNING_MINUTE = AUTO_CLEAN_MIDNIGHT_MINUTE
 
 # File size limits (Telegram bot upload limit is typically 50 MB, or 2000 MB with Local Bot API)
 LOCAL_BOT_API_URL = os.getenv("LOCAL_BOT_API_URL", "").strip().rstrip("/")

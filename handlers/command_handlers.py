@@ -885,7 +885,7 @@ async def clean_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         pass
 
 async def autoclean_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Toggle twice-daily auto-clean (3:00 AM & 12:00 PM): /autoclean."""
+    """Toggle twice-daily auto-clean (12:00 PM & 12:00 AM Midnight): /autoclean."""
     chat_id = update.effective_chat.id
     from database import is_auto_clean_enabled, set_auto_clean_enabled
     current = is_auto_clean_enabled(chat_id)
@@ -894,16 +894,16 @@ async def autoclean_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if new_state:
         msg = (
-            "🧹 *បានបើកមុខងារ Auto-Clean History (3AM & 12PM)!* ✅\n\n"
+            "🧹 *បានបើកមុខងារ Auto-Clean History (១២ ថ្ងៃ & ១២ យប់)!* ✅\n\n"
             "Bot នឹងសម្អាតប្រវត្តិសារទាំងអស់ដោយស្វ័យប្រវត្ត ២ ដងក្នុងមួយថ្ងៃ៖\n"
-            "• ⏰ **ម៉ោង ៣:០០ ព្រឹក** (ម៉ោងនៅកម្ពុជា)\n"
-            "• ⏰ **ម៉ោង ១២:០០ ថ្ងៃត្រង់** (ម៉ោងនៅកម្ពុជា)\n\n"
+            "• ⏰ **ម៉ោង ១២:០០ ថ្ងៃត្រង់** (ម៉ោងនៅកម្ពុជា)\n"
+            "• ⏰ **ម៉ោង ១២:០០ យប់ (អធ្រាត្រ)** (ម៉ោងនៅកម្ពុជា)\n\n"
             "ជួយឱ្យការជជែករបស់អ្នកមានសភាពស្អាតស្រឡះជានិច្ច និងគ្មានសារចាស់ៗកកកុញឡើយ។"
         )
     else:
         msg = (
             "🔕 *បានបិទមុខងារ Auto-Clean History!* ❌\n\n"
-            "សារនឹងមិនត្រូវសម្អាតស្វ័យប្រវត្តនៅម៉ោង ៣:០០ ព្រឹក និង ១២:០០ ថ្ងៃត្រង់ទៀតឡើយ។"
+            "សារនឹងមិនត្រូវសម្អាតស្វ័យប្រវត្តនៅម៉ោង ១២:០០ ថ្ងៃត្រង់ និង ១២:០០ យប់ទៀតឡើយ។"
         )
     await send_clean_response(update, context, msg, reply_markup=get_back_keyboard())
 
@@ -4329,7 +4329,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             current = is_auto_clean_enabled(chat_id)
             new_state = not current
             set_auto_clean_enabled(chat_id, new_state)
-            status_alert = "✅ បានបើក Auto-Clean (៣:០០ ព្រឹក & ១២:០០ ថ្ងៃ)!" if new_state else "❌ បានបិទ Auto-Clean (៣:០០ ព្រឹក & ១២:០០ ថ្ងៃ)!"
+            status_alert = "✅ បានបើក Auto-Clean (១២:០០ ថ្ងៃ & ១២:០០ យប់)!" if new_state else "❌ បានបិទ Auto-Clean (១២:០០ ថ្ងៃ & ១២:០០ យប់)!"
             await query.answer(status_alert)
             first_name = user.first_name if user else "លោកអ្នក"
             await query.edit_message_text(

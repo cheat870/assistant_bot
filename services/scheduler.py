@@ -214,7 +214,7 @@ async def scheduled_clear_history_job(context):
                 # 6. Send a fresh main menu so user is greeted with a clean screen
                 notice_text = (
                     "🧹 *ការសម្អាតប្រវត្តិសារស្វ័យប្រវត្តិ (Auto-Clean History)* ✨\n\n"
-                    "ប្រព័ន្ធបានសម្អាតប្រវត្តិសារទាំងអស់ដោយស្វ័យប្រវត្ត (តាមកាលវិភាគម៉ោង ៣:០០ ព្រឹក និង ១២:០០ ថ្ងៃត្រង់)។\n"
+                    "ប្រព័ន្ធបានសម្អាតប្រវត្តិសារទាំងអស់ដោយស្វ័យប្រវត្ត (តាមកាលវិភាគម៉ោង ១២:០០ ថ្ងៃត្រង់ និង ១២:០០ យប់)។\n"
                     "ការជជែករបស់អ្នកឥឡូវនេះមានសភាពស្អាតស្រឡះជានិច្ច! 🌿\n\n"
                     "សូមជ្រើសរើសមុខងារដែលចង់ប្រើប្រាស់បន្តខាងក្រោម៖"
                 )
@@ -315,20 +315,20 @@ def setup_scheduler(app: Application):
     )
     logger.info("Registered custom reminders checker job (every 60s).")
 
-    # 5. Scheduled Twice-Daily Auto-Clean: 3:00 AM & 12:00 PM (Asia/Phnom_Penh)
-    clean_3am_time = time(hour=AUTO_CLEAN_MORNING_HOUR, minute=AUTO_CLEAN_MORNING_MINUTE, tzinfo=BOT_TIMEZONE)
+    # 5. Scheduled Twice-Daily Auto-Clean: 12:00 PM (Noon) & 12:00 AM (Midnight) (Asia/Phnom_Penh)
+    clean_midnight_time = time(hour=AUTO_CLEAN_MORNING_HOUR, minute=AUTO_CLEAN_MORNING_MINUTE, tzinfo=BOT_TIMEZONE)
     clean_12pm_time = time(hour=AUTO_CLEAN_NOON_HOUR, minute=AUTO_CLEAN_NOON_MINUTE, tzinfo=BOT_TIMEZONE)
     job_queue.run_daily(
         scheduled_clear_history_job,
-        time=clean_3am_time,
-        name="daily_3am_history_clean"
+        time=clean_midnight_time,
+        name="daily_midnight_history_clean"
     )
     job_queue.run_daily(
         scheduled_clear_history_job,
         time=clean_12pm_time,
         name="daily_12pm_history_clean"
     )
-    logger.info(f"Registered twice-daily chat auto-clean at 3:00 AM and 12:00 PM ({BOT_TIMEZONE}).")
+    logger.info(f"Registered twice-daily chat auto-clean at 12:00 PM (Noon) and 12:00 AM (Midnight) ({BOT_TIMEZONE}).")
 
     # 6. Crypto Price Alert Checker: Check every 5 minutes (300s)
     job_queue.run_repeating(
