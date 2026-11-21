@@ -1,3 +1,4 @@
+import os
 import re
 import html
 import io
@@ -12,6 +13,7 @@ from telegram import (
     InlineKeyboardMarkup,
     ReplyKeyboardMarkup,
     KeyboardButton,
+    WebAppInfo,
 )
 from telegram.ext import ContextTypes
 
@@ -38,6 +40,8 @@ from database import (
     save_pdf_session,
     get_pdf_session,
     clear_pdf_session,
+    get_user_persona,
+    set_user_persona,
 )
 from services.holiday_calendar import (
     format_upcoming_message,
@@ -162,97 +166,254 @@ def parse_reminder_input(text: str):
 import pytz
 pytz_utc = pytz.utc
 
-def get_welcome_text(user_first_name: str) -> str:
-    """Standard welcome message text for the dashboard."""
-    return (
-        f"🌟 *មជ្ឈមណ្ឌលជំនួយការឆ្លាតវៃ (Smart Assistant Hub)* 🇰🇭\n\n"
-        f"👋 សួស្តី *{user_first_name}*! សូមជ្រើសរើសមុខងារដែលអ្នកត្រូវការប្រើប្រាស់៖\n\n"
-        "📥 *១. Video Downloader:* Copy link (TikTok, YouTube, Facebook, IG, X) ផ្ញើចូលទីនេះភ្លាមៗ\n"
-        "🎧 *២. ចម្រៀង MP3:* វាយ `/song <ឈ្មោះបទ>` ទាញយក file MP3 320kbps ភ្លាមៗ\n"
-        "📊 *៣. កត់ត្រាចំណូល-ចំណាយ:* វាយ `/spend 5$ coffee` ឬ `ចាយ 20,000៛ ញ៉ាំបាយ` មើលរបាយការណ៍ `/budget`\n"
-        "🗣️ *៤. អានជាសំឡេង (TTS):* វាយ `/speak <អត្ថបទ>` បម្លែងអក្សរទៅជាសំឡេងនិយាយភាសាខ្មែរ/អង់គ្លេស\n"
-        "✍️ *៥. ពិនិត្យអក្ខរាវិរុទ្ធខ្មែរ:* វាយ `/check <អត្ថបទ>` កែតម្រូវតាមវចនានុក្រម សម្តេច ជួន ណាត\n"
-        "🌐 *៦. បកប្រែភាសា Pro:* វាយ `/translate <អត្ថបទ>` បកប្រែ English ⬄ Khmer ជាមួយការបញ្ចេញសំឡេង\n"
-        "✂️ *៧. កាត់ Background រូបភាព:* ផ្ញើរូបភាព ឬ Reply ដោយវាយ `/rembg` ក្លាយជា Transparent PNG\n"
-        "💰 *៨. សេដ្ឋកិច្ចកម្ពុជា:* អត្រាប្តូរប្រាក់ NBC/USD/KHR, តម្លៃមាស, តម្លៃប្រេងឥន្ធនៈ (`/finance`)\n"
-        "📰 *៩. ព័ត៌មានពេលព្រឹក ៧:០០ AM:* សេចក្តីសង្ខេបព័ត៌មានជាតិ & បច្ចេកវិទ្យា (`/news`)\n"
-        "🛡️ *១០. ការពារ Group Telegram:* ទប់ស្កាត់ Spam, Casino Ads & Bot ក្លែងក្លាយ (`/antispam`)\n"
-        "🔔 *១១. សារដាស់តឿន & អាកាសធាតុ:* `/remind` និងដំណឹងអាកាសធាតុ ៥:០០ ព្រឹកស្វ័យប្រវត្ត\n"
-        "📄 *១២. Chat with PDF:* ផ្ញើ File PDF មកកាន់ Bot នឹងអាន & សង្ខេបចំណុចសំខាន់ៗភ្លាមៗ (`/pdf`)\n"
-        "🔍 *១៣. ធ្វើឱ្យច្បាស់ HD:* វាយ `/enhance` លើរូបភាពដើម្បីសម្អាត Noise & Super-Resolution\n"
-        "💧 *១៤. ដាក់ Watermark:* វាយ `/watermark <ឈ្មោះហាង>` បោះត្រាការពាររូបភាពទំនិញ\n"
-        "🖼️ *១៥. Banner ស្វាគមន៍:* បង្កើតរូបភាពស្វាគមន៍សមាជិកថ្មីក្នុង Group ស្វ័យប្រវត្ត (`/welcome on|off`)\n\n"
-        "👇 _សូមចុចជ្រើសរើស Menu ខាងក្រោម៖_"
-    )
+WEBAPP_URL = os.getenv("WEBAPP_URL", "https://assistant-bot-9ncu.onrender.com/app")
 
-def get_main_menu_keyboard(chat_id: int) -> InlineKeyboardMarkup:
-    """Upgraded inline dashboard keyboard with all modern features."""
+def get_welcome_text(user_first_name: str, chat_id: Optional[int] = None, page: int = 1) -> str:
+    """Dynamic personalized welcome message based on selected persona or slider page."""
+    persona = get_user_persona(chat_id) if chat_id else "all"
+
+    if persona == "student":
+        return (
+            f"🎓 *មជ្ឈមណ្ឌលជំនួយការ - របៀបសិស្ស/និស្សិត (Student Mode)* ✨\n\n"
+            f"👋 សួស្តី *{user_first_name}*! ផ្ទាំងនេះត្រូវបានរៀបចំពិសេសសម្រាប់ការសិក្សា & ស្រាវជ្រាវ៖\n\n"
+            "📚 *១. ដោះស្រាយលំហាត់:* ផ្ញើរូបភាពលំហាត់ចូល Bot នឹងអាន & ដោះស្រាយជាជំហានៗ\n"
+            "📄 *២. Chat with PDF:* ផ្ញើ File PDF សៀវភៅ ឬមេរៀន ដើម្បីសង្ខេប & សួរសំណួរ (`/pdf`)\n"
+            "🌐 *៣. បកប្រែភាសា Pro:* បកប្រែ English ⬄ Khmer ជាមួយការបញ្ចេញសំឡេង (`/translate`)\n"
+            "✍️ *៤. ពិនិត្យអក្ខរាវិរុទ្ធ:* កែតម្រូវពាក្យខុសតាមវចនានុក្រម សម្តេច ជួន ណាត (`/check`)\n"
+            "📝 *៥. សង្ខេប YouTube AI:* ផ្ញើ Link មេរៀន YouTube ឬ Podcast សង្ខេបចំណុចសំខាន់ៗ (`/sum`)\n"
+            "🎧 *៦. Web ➔ Audio Podcast:* បម្លែង Web Article ទៅជា Audio Podcast ស្តាប់កម្សាន្ត (`/listen`)\n"
+            "💻 *៧. Code Sandbox:* សាកល្បង Run កូដ Python, JS, C++ និង AI Debugger (`/code`)\n\n"
+            "👇 _ចុចប៊ូតុងខាងក្រោម ឬបើក Mini App ដើម្បីចាប់ផ្តើម៖_"
+        )
+    elif persona == "business":
+        return (
+            f"💼 *មជ្ឈមណ្ឌលជំនួយការ - របៀបអាជីវកម្ម & លក់ដូរ (Business Mode)* ✨\n\n"
+            f"👋 សួស្តី *{user_first_name}*! ផ្ទាំងនេះត្រូវបានរៀបចំពិសេសសម្រាប់អាជីវកម្ម & ការគ្រប់គ្រង៖\n\n"
+            "🧾 *១. ស្កេនវិក្កយបត្រ AI:* ថតរូបវិក្កយបត្រ ឬស្លីបធនាគារ ABA/Bakong កត់ចូលប្រព័ន្ធស្វ័យប្រវត្ត\n"
+            "📊 *២. ចំណូល-ចំណាយ:* កត់ត្រាចំណាយ `/spend` និងទាញយក Excel / Donut Chart (`/budget`)\n"
+            "💧 *៣. ការពាររូបទំនិញ:* វាយ `/watermark <ឈ្មោះហាង>` បោះត្រាការពារគេលួចចម្លង\n"
+            "🛠️ *៤. KHQR & QR:* បង្កើត QR Code សម្រាប់ទទួលប្រាក់ ឬ Link អាជីវកម្ម (`/qr`)\n"
+            "💵 *៥. សេដ្ឋកិច្ចកម្ពុជា:* អត្រាប្តូរប្រាក់ NBC, តម្លៃមាស, សាំង និងផ្សារ Crypto/TON (`/finance`)\n"
+            "✂️ *៦. កាត់ Background:* កាត់ផ្ទៃខាងក្រោយរូបភាពទំនិញក្លាយជា Transparent PNG (`/rembg`)\n\n"
+            "👇 _ចុចប៊ូតុងខាងក្រោម ឬបើក Mini App ដើម្បីចាប់ផ្តើម៖_"
+        )
+    elif persona == "creator":
+        return (
+            f"🎬 *មជ្ឈមណ្ឌលជំនួយការ - របៀបអ្នកកាត់ត & Media (Creator Mode)* ✨\n\n"
+            f"👋 សួស្តី *{user_first_name}*! ផ្ទាំងនេះត្រូវបានរៀបចំពិសេសសម្រាប់អ្នកបង្កើតមាតិកា៖\n\n"
+            "📥 *១. Video Downloader:* ទាញយកវីដេអូ 4K/8K គ្មាន Watermark (TikTok, FB, YT, IG, X)\n"
+            "🎨 *២. AI Imagine:* បង្កើតរូបភាព Ultra HD តាមការពិពណ៌នាជាខ្មែរ (`/imagine`)\n"
+            "✂️ *៣. Video Trimmer & GIF:* កាត់វីដេអូក្នុង Chat (`/trim`) & បម្លែងជា GIF (`/gif`)\n"
+            "📑 *៤. Khmer Subtitles:* ទាញយក Subtitle ពី YouTube រួចបកប្រែជាខ្មែរ .SRT (`/sub`)\n"
+            "🎧 *៥. YouTube Playlist:* ទាញយកចម្រៀងទាំងកញ្ចប់ចូល Channel @Song182 (`/playlist`)\n"
+            "🌌 *៦. Super-Res 8K:* ពង្រីកគុណភាពរូបភាពដល់ 4K & 8K Super-Res (`/enhance 8k`)\n\n"
+            "👇 _ចុចប៊ូតុងខាងក្រោម ឬបើក Mini App ដើម្បីចាប់ផ្តើម៖_"
+        )
+    else:
+        page_titles = {
+            1: "🌟 *ទំព័រ ១/៣៖ មុខងារពេញនិយម & AI Superpowers*",
+            2: "💼 *ទំព័រ ២/៣៖ ហិរញ្ញវត្ថុ ការងារ & ផលិតភាព*",
+            3: "🛠️ *ទំព័រ ៣/៣៖ ឧបករណ៍ប្រចាំថ្ងៃ ការពារ & ប្រព័ន្ធ*"
+        }
+        p_title = page_titles.get(page, page_titles[1])
+        return (
+            f"🌟 *មជ្ឈមណ្ឌលជំនួយការឆ្លាតវៃ (Smart Assistant Hub)* 🇰🇭\n\n"
+            f"👋 សួស្តី *{user_first_name}*! {p_title}\n\n"
+            "💡 _លោកអ្នកអាចចុច '📱 បើក Control Center' ដើម្បីប្រើផ្ទាំង App ទំនើប ឬចុចរំកិលទំព័រ [1/3] ⬅️ ➡️ ខាងក្រោម៖_"
+        )
+
+def get_main_menu_keyboard(chat_id: int, page: int = 1) -> InlineKeyboardMarkup:
+    """Dynamic, paginated, and persona-driven main menu keyboard with Telegram Mini App support."""
+    persona = get_user_persona(chat_id)
+
+    # Common Top Web App Button
+    webapp_btn = [
+        InlineKeyboardButton("📱 បើក Control Center (Mini App)", web_app=WebAppInfo(url=WEBAPP_URL))
+    ]
+
     holiday_sub = is_subscribed(chat_id)
     holiday_btn_text = "🔕 បិទបុណ្យជាតិ 4AM" if holiday_sub else "🔔 បើកបុណ្យជាតិ 4AM"
     holiday_callback = "btn_unsubscribe" if holiday_sub else "btn_subscribe"
-    
+
     w_settings = get_user_weather_settings(chat_id)
     weather_active = w_settings.get("is_active", True)
     weather_btn_text = "🔕 បិទអាកាសធាតុ 5AM" if weather_active else "🌅 បើកអាកាសធាតុ 5AM"
     weather_callback = "btn_toggle_weather_off" if weather_active else "btn_toggle_weather_on"
-    
+
     ai_active = is_ai_mode(chat_id)
-    ai_btn_text = "💬 បិទ AI Continuous Chat" if ai_active else "🤖 បើក AI Continuous Chat"
-    
+    ai_btn_text = "💬 បិទ Continuous AI" if ai_active else "🤖 បើក Continuous AI"
+
     from database import is_auto_clean_enabled
     auto_clean_active = is_auto_clean_enabled(chat_id)
-    auto_clean_text = "🧹 Auto-Clean (3AM/12PM): ✅" if auto_clean_active else "🧹 Auto-Clean (3AM/12PM): ❌"
+    auto_clean_text = "🧹 Auto-Clean: ✅" if auto_clean_active else "🧹 Auto-Clean: ❌"
 
-    keyboard = [
-        [
-            InlineKeyboardButton("📥 របៀបទាញយកវីដេអូ", callback_data="btn_video_help"),
-            InlineKeyboardButton("🎧 ស្វែងរកចម្រៀង MP3", callback_data="btn_music_help"),
-        ],
-        [
-            InlineKeyboardButton("📊 ចំណូល-ចំណាយ (Budget)", callback_data="btn_budget"),
-            InlineKeyboardButton("💰 សេដ្ឋកិច្ច / មាស / សាំង", callback_data="btn_finance"),
-        ],
-        [
-            InlineKeyboardButton("📈 ផ្សារ Crypto & TON", callback_data="btn_crypto_menu"),
-            InlineKeyboardButton("🔍 ស្វែងរក Profile (/user)", callback_data="btn_user_help"),
-        ],
-        [
-            InlineKeyboardButton("👑 សង្ខេបពេលព្រឹក VIP", callback_data="btn_briefing"),
-            InlineKeyboardButton("🌤️ អាកាសធាតុបច្ចុប្បន្ន", callback_data="btn_weather_now"),
-        ],
-        [
-            InlineKeyboardButton(holiday_btn_text, callback_data=holiday_callback),
-            InlineKeyboardButton(weather_btn_text, callback_data=weather_callback),
-        ],
-        [
-            InlineKeyboardButton(ai_btn_text, callback_data="btn_toggle_aimode"),
-            InlineKeyboardButton("⏰ សារដាស់តឿន (Reminders)", callback_data="btn_reminders"),
-        ],
-        [
-            InlineKeyboardButton("🗜️ File Master (/compress)", callback_data="btn_compress_help"),
-            InlineKeyboardButton("🔍 ធ្វើឱ្យច្បាស់ HD (/enhance)", callback_data="btn_photo_enhance_help"),
-        ],
-        [
-            InlineKeyboardButton("🚗 ធ្វើដំណើរ & ឡាន (/trip)", callback_data="btn_trip_menu"),
-            InlineKeyboardButton("💻 Code Runner (/code)", callback_data="btn_code_menu"),
-        ],
-        [
-            InlineKeyboardButton("🎧 Web Podcast (/listen)", callback_data="btn_podcast_help"),
-            InlineKeyboardButton("🎸 Chord តន្ត្រី (/chord)", callback_data="btn_chord_help"),
-        ],
-        [
-            InlineKeyboardButton("🎬 AI Content Studio (/caption)", callback_data="btn_content_help"),
-            InlineKeyboardButton("🛠️ ឧបករណ៍ QR / KHQR", callback_data="btn_tools_menu"),
-        ],
-        [
-            InlineKeyboardButton(auto_clean_text, callback_data="btn_toggle_autoclean"),
-            InlineKeyboardButton("🧹 សម្អាតសារភ្លាមៗ (/clean)", callback_data="btn_clean_chat"),
-        ],
-        [
-            InlineKeyboardButton("💡 ការណែនាំ (Help)", callback_data="btn_help"),
-            InlineKeyboardButton("✨ ជំនួយការ AI (Gemini)", callback_data="btn_ai_menu"),
-        ]
-    ]
+    keyboard = [webapp_btn]
+
+    # PERSONA 1: STUDENT
+    if persona == "student":
+        keyboard.extend([
+            [
+                InlineKeyboardButton("📚 ដោះស្រាយលំហាត់ AI", callback_data="btn_ai_vision_help"),
+                InlineKeyboardButton("📄 Chat with PDF (/pdf)", callback_data="btn_pdf_help"),
+            ],
+            [
+                InlineKeyboardButton("🌐 បកប្រែភាសា Pro", callback_data="btn_translate_help"),
+                InlineKeyboardButton("✍️ ពិនិត្យអក្ខរាវិរុទ្ធ", callback_data="btn_check_help"),
+            ],
+            [
+                InlineKeyboardButton("📝 សង្ខេប YouTube AI", callback_data="btn_summarize_help"),
+                InlineKeyboardButton("🎧 Web Article ➔ Podcast", callback_data="btn_podcast_help"),
+            ],
+            [
+                InlineKeyboardButton("💻 Code Runner (/code)", callback_data="btn_code_menu"),
+                InlineKeyboardButton(ai_btn_text, callback_data="btn_toggle_aimode"),
+            ],
+            [
+                InlineKeyboardButton("🎭 ប្តូរ Persona", callback_data="btn_choose_persona"),
+                InlineKeyboardButton("🌐 មើល Menu ទាំងអស់ (Slider)", callback_data="set_persona_all"),
+            ]
+        ])
+
+    # PERSONA 2: BUSINESS / MERCHANT
+    elif persona == "business":
+        keyboard.extend([
+            [
+                InlineKeyboardButton("🧾 ស្កេនវិក្កយបត្រ AI", callback_data="btn_scan_receipt_help"),
+                InlineKeyboardButton("📊 ចំណូល-ចំណាយ (Budget)", callback_data="btn_budget"),
+            ],
+            [
+                InlineKeyboardButton("📈 ក្រាហ្វិក Donut Chart", callback_data="btn_budget_chart"),
+                InlineKeyboardButton("📥 ទាញយកជា Excel", callback_data="btn_budget_excel"),
+            ],
+            [
+                InlineKeyboardButton("💧 ដាក់ Watermark ទំនិញ", callback_data="btn_photo_watermark_help"),
+                InlineKeyboardButton("🛠️ ឧបករណ៍ QR / KHQR", callback_data="btn_tools_menu"),
+            ],
+            [
+                InlineKeyboardButton("💵 តម្លៃមាស & អត្រា NBC", callback_data="btn_finance"),
+                InlineKeyboardButton("✂️ កាត់ Background រូប", callback_data="btn_photo_rembg_help"),
+            ],
+            [
+                InlineKeyboardButton("🎬 AI Caption Studio", callback_data="btn_content_help"),
+                InlineKeyboardButton("🚗 ធ្វើដំណើរ & ឡាន (/trip)", callback_data="btn_trip_menu"),
+            ],
+            [
+                InlineKeyboardButton("🎭 ប្តូរ Persona", callback_data="btn_choose_persona"),
+                InlineKeyboardButton("🌐 មើល Menu ទាំងអស់ (Slider)", callback_data="set_persona_all"),
+            ]
+        ])
+
+    # PERSONA 3: CREATOR & MEDIA
+    elif persona == "creator":
+        keyboard.extend([
+            [
+                InlineKeyboardButton("📥 របៀបទាញយក 4K/8K", callback_data="btn_video_help"),
+                InlineKeyboardButton("🎧 YouTube Playlist Batch", callback_data="btn_playlist_help"),
+            ],
+            [
+                InlineKeyboardButton("🎨 បង្កើតរូបភាព AI (/imagine)", callback_data="btn_imagine_help"),
+                InlineKeyboardButton("🌌 ធ្វើឱ្យរូបច្បាស់ 4K & 8K", callback_data="btn_photo_enhance_help"),
+            ],
+            [
+                InlineKeyboardButton("✂️ កាត់តវីដេអូ (/trim)", callback_data="btn_trim_help"),
+                InlineKeyboardButton("🎞️ បម្លែងវីដេអូជា GIF (/gif)", callback_data="btn_gif_help"),
+            ],
+            [
+                InlineKeyboardButton("📑 ទាញយក Subtitle ខ្មែរ", callback_data="btn_subtitle_help"),
+                InlineKeyboardButton("📻 ឃ្លាំងចម្រៀង @Song182", url="https://t.me/Song182"),
+            ],
+            [
+                InlineKeyboardButton("🎭 ប្តូរ Persona", callback_data="btn_choose_persona"),
+                InlineKeyboardButton("🌐 មើល Menu ទាំងអស់ (Slider)", callback_data="set_persona_all"),
+            ]
+        ])
+
+    # PERSONA 4: ALL-IN-ONE PAGINATED SLIDER
+    else:
+        if page == 1:
+            keyboard.extend([
+                [
+                    InlineKeyboardButton("🎨 បង្កើតរូបភាព AI (/imagine)", callback_data="btn_imagine_help"),
+                    InlineKeyboardButton("📝 សង្ខេបវីដេអូ AI (/sum)", callback_data="btn_summarize_help"),
+                ],
+                [
+                    InlineKeyboardButton("📥 របៀបទាញយកវីដេអូ", callback_data="btn_video_help"),
+                    InlineKeyboardButton("🎧 ស្វែងរកចម្រៀង MP3", callback_data="btn_music_help"),
+                ],
+                [
+                    InlineKeyboardButton("🌌 Super-Res 4K & 8K", callback_data="btn_photo_enhance_help"),
+                    InlineKeyboardButton("🗣️ អានជាសំឡេង (/speak)", callback_data="btn_speak_help"),
+                ],
+                [
+                    InlineKeyboardButton(ai_btn_text, callback_data="btn_toggle_aimode"),
+                    InlineKeyboardButton("💡 ការណែនាំ (Help)", callback_data="btn_help"),
+                ],
+                [
+                    InlineKeyboardButton("📄 [1/3] ពេញនិយម", callback_data="noop"),
+                    InlineKeyboardButton("បន្ទាប់ ➡️", callback_data="menu_page_2"),
+                ],
+                [
+                    InlineKeyboardButton("🎭 ជ្រើសរើស Persona (Role Mode)", callback_data="btn_choose_persona")
+                ]
+            ])
+        elif page == 2:
+            keyboard.extend([
+                [
+                    InlineKeyboardButton("📊 ចំណូល-ចំណាយ (Budget)", callback_data="btn_budget"),
+                    InlineKeyboardButton("🧾 ស្កេនវិក្កយបត្រ", callback_data="btn_scan_receipt_help"),
+                ],
+                [
+                    InlineKeyboardButton("💰 សេដ្ឋកិច្ច / មាស / សាំង", callback_data="btn_finance"),
+                    InlineKeyboardButton("📈 ផ្សារ Crypto & TON", callback_data="btn_crypto_menu"),
+                ],
+                [
+                    InlineKeyboardButton("📄 Chat with PDF (/pdf)", callback_data="btn_pdf_help"),
+                    InlineKeyboardButton("🗜️ File Master (/compress)", callback_data="btn_compress_help"),
+                ],
+                [
+                    InlineKeyboardButton("🌐 បកប្រែ Pro (/translate)", callback_data="btn_translate_help"),
+                    InlineKeyboardButton("✍️ ពិនិត្យអក្ខរាវិរុទ្ធ", callback_data="btn_check_help"),
+                ],
+                [
+                    InlineKeyboardButton("⬅️ ថយក្រោយ", callback_data="menu_page_1"),
+                    InlineKeyboardButton("📄 [2/3] ហិរញ្ញវត្ថុ", callback_data="noop"),
+                    InlineKeyboardButton("បន្ទាប់ ➡️", callback_data="menu_page_3"),
+                ],
+                [
+                    InlineKeyboardButton("🎭 ជ្រើសរើស Persona (Role Mode)", callback_data="btn_choose_persona")
+                ]
+            ])
+        else: # Page 3
+            keyboard.extend([
+                [
+                    InlineKeyboardButton(weather_btn_text, callback_data=weather_callback),
+                    InlineKeyboardButton(holiday_btn_text, callback_data=holiday_callback),
+                ],
+                [
+                    InlineKeyboardButton("⏰ សារដាស់តឿន (/remind)", callback_data="btn_reminders"),
+                    InlineKeyboardButton("✂️ កាត់វីដេអូ & GIF (/trim)", callback_data="btn_trim_help"),
+                ],
+                [
+                    InlineKeyboardButton("💧 ដាក់ Watermark", callback_data="btn_photo_watermark_help"),
+                    InlineKeyboardButton("✂️ កាត់ Background (/rembg)", callback_data="btn_photo_rembg_help"),
+                ],
+                [
+                    InlineKeyboardButton("🚗 ធ្វើដំណើរ & ឡាន (/trip)", callback_data="btn_trip_menu"),
+                    InlineKeyboardButton("💻 Code Runner (/code)", callback_data="btn_code_menu"),
+                ],
+                [
+                    InlineKeyboardButton(auto_clean_text, callback_data="btn_toggle_autoclean"),
+                    InlineKeyboardButton("🖥️ Local API 2GB", callback_data="btn_botserver_info"),
+                ],
+                [
+                    InlineKeyboardButton("⬅️ ថយក្រោយ", callback_data="menu_page_2"),
+                    InlineKeyboardButton("📄 [3/3] ឧបករណ៍", callback_data="noop"),
+                ],
+                [
+                    InlineKeyboardButton("🎭 ជ្រើសរើស Persona (Role Mode)", callback_data="btn_choose_persona")
+                ]
+            ])
+
     return InlineKeyboardMarkup(keyboard)
 
 def get_crypto_keyboard() -> InlineKeyboardMarkup:
@@ -464,7 +625,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_clean_response(
         update=update,
         context=context,
-        text=get_welcome_text(first_name),
+        text=get_welcome_text(first_name, chat_id=chat.id),
         reply_markup=get_main_menu_keyboard(chat.id),
         parse_mode="Markdown"
     )
@@ -3960,18 +4121,20 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         elif data == "btn_back_main":
             await query.answer()
             first_name = user.first_name if user else "លោកអ្នក"
+            msg = get_welcome_text(first_name, chat_id=chat_id, page=1)
+            kb = get_main_menu_keyboard(chat_id, page=1)
             try:
                 await query.edit_message_text(
-                    get_welcome_text(first_name),
-                    reply_markup=get_main_menu_keyboard(chat_id),
+                    msg,
+                    reply_markup=kb,
                     parse_mode="Markdown"
                 )
             except Exception:
                 # If editing text fails (e.g. on a photo/media message), send fresh main menu
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text=get_welcome_text(first_name),
-                    reply_markup=get_main_menu_keyboard(chat_id),
+                    text=msg,
+                    reply_markup=kb,
                     parse_mode="Markdown"
                 )
 
@@ -4170,12 +4333,244 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             await query.answer(status_alert)
             first_name = user.first_name if user else "លោកអ្នក"
             await query.edit_message_text(
-                get_welcome_text(first_name),
+                get_welcome_text(first_name, chat_id=chat_id),
                 reply_markup=get_main_menu_keyboard(chat_id),
                 parse_mode="Markdown"
             )
             context.user_data["last_bot_msg_id"] = query.message.message_id
             context.user_data["last_menu_id"] = query.message.message_id
+
+        elif data.startswith("menu_page_"):
+            await query.answer()
+            page_num = int(data.replace("menu_page_", ""))
+            first_name = user.first_name if user else "លោកអ្នក"
+            msg = get_welcome_text(first_name, chat_id=chat_id, page=page_num)
+            kb = get_main_menu_keyboard(chat_id, page=page_num)
+            try:
+                await query.edit_message_text(msg, reply_markup=kb, parse_mode="Markdown")
+            except Exception:
+                pass
+
+        elif data == "btn_choose_persona":
+            await query.answer()
+            msg = (
+                "🎭 *ជ្រើសរើស Persona / Role សម្រាប់គណនីរបស់អ្នក* ✨\n\n"
+                "ជ្រើសរើសប្រភេទការងាររបស់អ្នកដើម្បីឱ្យ Bot បង្ហាញប៊ូតុងមុខងារដែលត្រូវនឹងតម្រូវការបំផុត៖\n\n"
+                "🎓 *១. របៀបសិស្ស/និស្សិត (Student Mode):*\n"
+                "• ដោះស្រាយលំហាត់ AI, Chat with PDF, បកប្រែភាសា Pro, ពិនិត្យអក្ខរាវិរុទ្ធ, សង្ខេប YouTube\n\n"
+                "💼 *២. របៀបអាជីវកម្ម/លក់ដូរ (Business Mode):*\n"
+                "• ស្កេនវិក្កយបត្រ AI, ចំណូល-ចំណាយ Budget, ក្រាហ្វិក Donut Chart, Watermark ទំនិញ, KHQR, តម្លៃមាស/សាំង\n\n"
+                "🎬 *៣. របៀបអ្នកកាត់ត & Media (Creator Mode):*\n"
+                "• ទាញយក 4K/8K, YouTube Playlist, កាត់វីដេអូ /trim, GIF Maker, បង្កើតរូប AI /imagine, Subtitle ខ្មែរ\n\n"
+                "🌐 *៤. បង្ហាញទាំងអស់ (All-in-One Slider):*\n"
+                "• ប្រើប្រាស់ Paginated Slider Menu ៣ ទំព័រ [1/3] ដូចធម្មតា\n\n"
+                "👇 _សូមចុចជ្រើសរើសខាងក្រោម៖_"
+            )
+            kb = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("🎓 របៀបសិស្ស/និស្សិត", callback_data="set_persona_student"),
+                    InlineKeyboardButton("💼 របៀបអាជីវកម្ម/លក់ដូរ", callback_data="set_persona_business"),
+                ],
+                [
+                    InlineKeyboardButton("🎬 របៀបអ្នកកាត់ត & Media", callback_data="set_persona_creator"),
+                    InlineKeyboardButton("🌐 បង្ហាញទាំងអស់ (Slider)", callback_data="set_persona_all"),
+                ],
+                [
+                    InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+                ]
+            ])
+            await query.edit_message_text(msg, reply_markup=kb, parse_mode="Markdown")
+
+        elif data.startswith("set_persona_"):
+            target_persona = data.replace("set_persona_", "")
+            set_user_persona(chat_id, target_persona)
+            persona_names = {
+                "student": "🎓 របៀបសិស្ស/និស្សិត (Student Mode)",
+                "business": "💼 របៀបអាជីវកម្ម/លក់ដូរ (Business Mode)",
+                "creator": "🎬 របៀបអ្នកកាត់ត & Media (Creator Mode)",
+                "all": "🌐 បង្ហាញទាំងអស់ (All-in-One Slider)"
+            }
+            chosen_name = persona_names.get(target_persona, "Menu")
+            await query.answer(f"✅ បានប្តូរទៅកាន់ {chosen_name} រួចរាល់!", show_alert=False)
+            first_name = user.first_name if user else "លោកអ្នក"
+            msg = get_welcome_text(first_name, chat_id=chat_id, page=1)
+            kb = get_main_menu_keyboard(chat_id, page=1)
+            try:
+                await query.edit_message_text(msg, reply_markup=kb, parse_mode="Markdown")
+            except Exception:
+                await context.bot.send_message(chat_id=chat_id, text=msg, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "noop":
+            await query.answer()
+
+        elif data == "btn_imagine_help":
+            await query.answer()
+            tip = (
+                "🎨 *[AI Image Generator - បង្កើតរូបភាព AI]* ✨\n\n"
+                "បង្កើតរូបភាព Ultra HD ពីពាក្យពិពណ៌នារបស់អ្នកដោយឥតគិតថ្លៃ!\n\n"
+                "👉 *របៀបប្រើប្រាស់៖*\n"
+                "វាយ៖ `/imagine <ពិពណ៌នារូបភាពដែលអ្នកចង់បាន>`\n\n"
+                "• ឧទាហរណ៍៖ `/imagine រថយន្តទំនើបបើកកាត់ប្រាសាទអង្គរវត្តពេលថ្ងៃលិច`\n"
+                "• ឧទាហរណ៍៖ `/imagine cute anime girl reading book in cozy coffee shop 4k cinematic`\n"
+                "• ឧទាហរណ៍៖ `/imagine នាគរាជខ្មែរហោះលើផ្ទៃមេឃពណ៌មាស`\n\n"
+                "⚡ *លក្ខណៈពិសេស៖* ក្រោយពេល Render រួច អ្នកអាចចុច Upscale 2K, 4K, ឬ 8K Super-Resolution បានភ្លាមៗ!"
+            )
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_summarize_help":
+            await query.answer()
+            tip = (
+                "📝 *[YouTube AI Video Summarizer - សង្ខេបវីដេអូ]* ✨\n\n"
+                "ជួយសន្សំពេលវេលាដោយមិនបាច់មើលវីដេអូរាប់ម៉ោង! AI នឹងស្ដាប់ និងសង្ខេបចំណុចសំខាន់ៗជាភាសាខ្មែរជូនភ្លាមៗ!\n\n"
+                "👉 *របៀបប្រើប្រាស់៖*\n"
+                "វាយ៖ `/summarize <Link វីដេអូ YouTube>`\n\n"
+                "• ឧទាហរណ៍៖ `/summarize https://www.youtube.com/watch?v=...`\n"
+                "💡 _ឬគ្រាន់តែ Reply លើសារដែលមាន Link វីដេអូ ដោយវាយពាក្យ:_ `/summarize` ឬ `/sum`"
+            )
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_trim_help":
+            await query.answer()
+            tip = (
+                "✂️ *[ឧបករណ៍កាត់តវីដេអូក្នុង Chat (Video Trimmer)]* 🎬\n\n"
+                "កាត់យកតែវិនាទី ឬនាទីដែលចង់បានដោយមិនចាំបាច់ប្រើកម្មវិធីកាត់តស្មុគស្មាញ!\n\n"
+                "👉 *របៀបប្រើប្រាស់៖*\n"
+                "1️⃣ ផ្ញើវីដេអូ ឬ Copy Link វីដេអូ YouTube/TikTok ចូល Bot\n"
+                "2️⃣ Reply លើវីដេអូនោះដោយវាយ៖ `/trim <វិនាទីចាប់ផ្តើម> <វិនាទីបញ្ចប់>`\n\n"
+                "• ឧទាហរណ៍៖ `/trim 00:10 00:45` (កាត់ពីវិនាទីទី ១០ ដល់ ៤៥)\n"
+                "• ឧទាហរណ៍៖ `/trim 01:20 02:00` (កាត់រយៈពេល ៤០ វិនាទី)\n\n"
+                "⚡ Bot នឹងកាត់ និង Render វីដេអូថ្មីផ្ញើជូនភ្លាមៗ!"
+            )
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_gif_help":
+            await query.answer()
+            tip = (
+                "🎞️ *[បម្លែងវីដេអូខ្លីជា Sticker / Animated GIF]* ✨\n\n"
+                "បង្កើត Animated GIF ទុកផ្ញើលេងក្នុង Group ឬឆាតផ្ទាល់ខ្លួន!\n\n"
+                "👉 *របៀបប្រើប្រាស់៖*\n"
+                "• Reply លើវីដេអូខ្លី ឬ TikTok Video ដោយវាយពាក្យ៖ `/gif`\n"
+                "• ឬវាយ៖ `/gif 00:05 00:10` ដើម្បីកាត់យក ៥ វិនាទីធ្វើជា GIF រលូនស្អាត!\n\n"
+                "🚀 Bot នឹងបម្លែង និងផ្ញើចេញជា GIF Animation ភ្លាមៗ!"
+            )
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_subtitle_help":
+            await query.answer()
+            tip = (
+                "📑 *[ទាញយក Subtitle / ចំណងជើងរងជាភាសាខ្មែរ]* 🇰🇭\n\n"
+                "ទាញយក Subtitle ពី YouTube និងប្រើប្រាស់ AI បកប្រែជាភាសាខ្មែរស្វ័យប្រវត្តិ!\n\n"
+                "👉 *របៀបប្រើប្រាស់៖*\n"
+                "• វាយ៖ `/subtitle <Link YouTube>`\n"
+                "• ឬចុចប៊ូតុង *📑 Subtitle* នៅពេលទាញយកវីដេអូ YouTube\n\n"
+                "📂 Bot នឹងផ្ញើចេញជា File `.srt` ដែលអាចចាក់ជាមួយ VLC Player ឬ Player ផ្សេងៗបានយ៉ាងងាយស្រួល!"
+            )
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_playlist_help":
+            await query.answer()
+            tip = (
+                "🎧 *[ទាញយកទាំង Playlist YouTube / TikTok Profile]* 🚀\n\n"
+                "ទាញយកចម្រៀង MP3 ឬវីដេអូទាំងអស់ក្នុង Playlist តែម្តងដោយស្វ័យប្រវត្តិ!\n\n"
+                "👉 *របៀបប្រើប្រាស់៖*\n"
+                "• វាយ៖ `/playlist <Link YouTube Playlist>`\n"
+                "• ឧទាហរណ៍៖ `/playlist https://www.youtube.com/playlist?list=...`\n\n"
+                "📻 បទចម្រៀងទាំងអស់ក្នុង Playlist នឹងត្រូវទាញយក និងបញ្ជូនចូល Channel @Song182 ទាំងអស់ក្នុងពេលតែមួយ!"
+            )
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_botserver_info":
+            await query.answer()
+            tip = (
+                "🖥️ *[Local Bot API Server (ផ្ញើ File បានដល់ 2,000 MB / 2 GB)]* 🚀\n\n"
+                "• *ដែនកំណត់ Telegram ធម្មតា:* ត្រឹមតែ 50 MB ប៉ុណ្ណោះ\n"
+                "• *ជាមួយ Local Bot API Server:* អនុញ្ញាតឱ្យ Bot អាចផ្ញើឯកសារវីដេអូ 4K/8K ធំៗបានដល់ *2,000 MB (2 GB)* ពេញទំហំដោយផ្ទាល់ក្នុង Chat!\n\n"
+                "💡 ប្រព័ន្ធត្រូវបានរៀបចំរួចរាល់សម្រាប់ Local API Routing ជួយឱ្យការទាញយក 4K/8K ដំណើរការបានរហ័ស និងមិនជាប់កំណត់ 50MB ឡើយ!"
+            )
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_speak_help":
+            await query.answer()
+            tip = (
+                "🗣️ *[Text-to-Speech (TTS) - អានជាសំឡេងខ្មែរ/អង់គ្លេស]* 🎙️\n\n"
+                "បម្លែងអត្ថបទទៅជាសំឡេងនិយាយយ៉ាងពិរោះ និងរលូន!\n\n"
+                "👉 *របៀបប្រើប្រាស់៖*\n"
+                "• វាយ៖ `/speak <អត្ថបទដែលចង់ឱ្យអាន>`\n"
+                "• ឧទាហរណ៍៖ `/speak សួស្តីបងប្អូនទាំងអស់គ្នា សូមស្វាគមន៍មកកាន់ថ្ងៃថ្មី!`\n"
+                "• ឧទាហរណ៍៖ `/speak Good morning everyone, have a wonderful day!`\n\n"
+                "💡 _ឬគ្រាន់តែ Reply លើសារណាមួយដោយវាយពាក្យ:_ `/speak`"
+            )
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_translate_help":
+            await query.answer()
+            tip = (
+                "🌐 *[បកប្រែភាសា Pro (Khmer ⬄ English)]* 📚\n\n"
+                "បកប្រែពាក្យ ឃ្លា និងអត្ថបទវែងៗយ៉ាងត្រឹមត្រូវតាមក្បួនវេយ្យាករណ៍!\n\n"
+                "👉 *របៀបប្រើប្រាស់៖*\n"
+                "• វាយ៖ `/translate <ពាក្យ ឬអត្ថបទ>`\n"
+                "• ឧទាហរណ៍៖ `/translate Artificial intelligence transforms the future`\n"
+                "• ឧទាហរណ៍៖ `/translate កម្ពុជាមានសម្បត្តិវប្បធម៌ដ៏សម្បូរបែប`\n\n"
+                "💡 _ឬគ្រាន់តែ Reply លើសារណាមួយដោយវាយពាក្យ:_ `/translate`"
+            )
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_check_help":
+            await query.answer()
+            tip = (
+                "✍️ *[ពិនិត្យអក្ខរាវិរុទ្ធភាសាខ្មែរ (Chuon Nath Dictionary)]* 📖\n\n"
+                "កែតម្រូវពាក្យខុស និងអក្ខរាវិរុទ្ធតាមក្បួនខ្នាតវចនានុក្រម សម្តេចព្រះសង្ឃរាជ ជួន ណាត!\n\n"
+                "👉 *របៀបប្រើប្រាស់៖*\n"
+                "• វាយ៖ `/check <អត្ថបទរបស់អ្នក>`\n"
+                "• ឧទាហរណ៍៖ `/check ខ្ញុំកំពុងសរេសរលិខិត`\n\n"
+                "💡 _Bot នឹងបង្ហាញពាក្យខុស ពាក្យត្រូវ និងអត្ថន័យច្បាស់លាស់!_"
+            )
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_ai_vision_help":
+            await query.answer()
+            tip = (
+                "📚 *[AI Vision - ដោះស្រាយលំហាត់ & ស្កេនរូបភាព]* 🧠\n\n"
+                "ជួយសិស្ស និស្សិតដោះស្រាយលំហាត់គណិត រូបវិទ្យា គីមី និងស្កេនសំណួរផ្សេងៗ!\n\n"
+                "👉 *របៀបប្រើប្រាស់៖*\n"
+                "1️⃣ ថតរូប ឬផ្ញើរូបភាពលំហាត់/សំណួរចូលក្នុង Bot\n"
+                "2️⃣ សរសេរ Caption ឬ Reply ដោយសរសេរពាក្យបញ្ជា (ឧ. `ជួយដោះស្រាយលំហាត់នេះមួយ` ឬ `ពន្យល់រូបមន្តនេះ`)\n\n"
+                "🚀 Gemini AI Vision នឹងវិភាគរូបភាព និងពន្យល់ដំណោះស្រាយជាជំហានៗយ៉ាងក្បោះក្បាយ!"
+            )
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
     except Exception as e:
         logger.warning(f"Callback error: {e}")
         try:
@@ -4554,4 +4949,34 @@ async def botserver_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Bot នឹងដំណើរការទាញយក និងផ្ញើវីដេអូកម្រិត 4K/8K ដល់ទំហំ 2GB ដោយស្វ័យប្រវត្តិ! ✨"
     )
     await safe_reply_text(update.message, guide)
+
+async def persona_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Command /persona or /mode to quickly change Persona."""
+    msg = (
+        "🎭 *ជ្រើសរើស Persona / Role សម្រាប់គណនីរបស់អ្នក* ✨\n\n"
+        "ជ្រើសរើសប្រភេទការងាររបស់អ្នកដើម្បីឱ្យ Bot បង្ហាញប៊ូតុងមុខងារដែលត្រូវនឹងតម្រូវការបំផុត៖\n\n"
+        "🎓 *១. របៀបសិស្ស/និស្សិត (Student Mode):*\n"
+        "• ដោះស្រាយលំហាត់ AI, Chat with PDF, បកប្រែភាសា Pro, ពិនិត្យអក្ខរាវិរុទ្ធ, សង្ខេប YouTube\n\n"
+        "💼 *២. របៀបអាជីវកម្ម/លក់ដូរ (Business Mode):*\n"
+        "• ស្កេនវិក្កយបត្រ AI, ចំណូល-ចំណាយ Budget, ក្រាហ្វិក Donut Chart, Watermark ទំនិញ, KHQR, តម្លៃមាស/សាំង\n\n"
+        "🎬 *៣. របៀបអ្នកកាត់ត & Media (Creator Mode):*\n"
+        "• ទាញយក 4K/8K, YouTube Playlist, កាត់វីដេអូ /trim, GIF Maker, បង្កើតរូប AI /imagine, Subtitle ខ្មែរ\n\n"
+        "🌐 *៤. បង្ហាញទាំងអស់ (All-in-One Slider):*\n"
+        "• ប្រើប្រាស់ Paginated Slider Menu ៣ ទំព័រ [1/3] ដូចធម្មតា\n\n"
+        "👇 _សូមចុចជ្រើសរើសខាងក្រោម៖_"
+    )
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎓 របៀបសិស្ស/និស្សិត", callback_data="set_persona_student"),
+            InlineKeyboardButton("💼 របៀបអាជីវកម្ម/លក់ដូរ", callback_data="set_persona_business"),
+        ],
+        [
+            InlineKeyboardButton("🎬 របៀបអ្នកកាត់ត & Media", callback_data="set_persona_creator"),
+            InlineKeyboardButton("🌐 បង្ហាញទាំងអស់ (Slider)", callback_data="set_persona_all"),
+        ],
+        [
+            InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
+        ]
+    ])
+    await send_clean_response(update, context, msg, reply_markup=kb, parse_mode="Markdown")
 

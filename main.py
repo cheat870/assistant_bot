@@ -106,6 +106,7 @@ from handlers.command_handlers import (
     trim_command,
     gif_command,
     botserver_command,
+    persona_command,
 )
 from handlers.video_handlers import handle_video_message, handle_media_download_callback
 
@@ -342,6 +343,10 @@ def main():
     app.add_handler(CommandHandler("summarize", summarize_command, block=False))
     app.add_handler(CommandHandler("sum", summarize_command, block=False))
     
+    # Persona / Role-Based Mode Handlers
+    app.add_handler(CommandHandler("persona", persona_command, block=False))
+    app.add_handler(CommandHandler("mode", persona_command, block=False))
+
     # Register Callback Query Handlers for Media Downloads & Buttons
     app.add_handler(CallbackQueryHandler(handle_media_download_callback, pattern="^(dlmp3_|dlthumb_|dlqual_|dlsum_|dlsub_)", block=False))
     app.add_handler(CallbackQueryHandler(button_callback_handler, block=False))

@@ -23,6 +23,15 @@ def init_db():
         )
     """)
 
+    # Table for user dashboard persona preferences (student, business, creator, all)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_personas (
+            chat_id INTEGER PRIMARY KEY,
+            persona TEXT DEFAULT 'all',
+            updated_at TEXT
+        )
+    """)
+
     # Table for subscribers of 5:00 AM daily weather alerts and their location
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS weather_settings (
@@ -1186,6 +1195,38 @@ def get_media_token_url(token: str) -> Optional[str]:
     except Exception as e:
         logger.warning(f"Failed to read media token {token}: {e}")
     return None
+
+def get_user_persona(chat_id: int) -> str:
+    """Retrieve user persona preference ('all', 'student', 'business', 'creator')."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT persona FROM user_personas WHERE chat_id = ?", (chat_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if row and row[0]:
+            return row[0]
+    except Exception as e:
+        logger.warning(f"Failed to read persona for {chat_id}: {e}")
+    return "all"
+
+def set_user_persona(chat_id: int, persona: str) -> bool:
+    """Save user persona preference."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO user_personas (chat_id, persona, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(chat_id) DO UPDATE SET persona = excluded.persona, updated_at = excluded.updated_at
+        """, (chat_id, persona, datetime.utcnow().isoformat()))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to save persona for {chat_id}: {e}")
+        return False
+
 
 
 
