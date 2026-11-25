@@ -337,6 +337,10 @@ def get_main_menu_keyboard(chat_id: int, page: int = 1) -> InlineKeyboardMarkup:
                     InlineKeyboardButton("📝 សង្ខេបវីដេអូ AI (/sum)", callback_data="btn_summarize_help"),
                 ],
                 [
+                    InlineKeyboardButton("✂️ Viral Shorts (/shorts)", callback_data="btn_shorts_help"),
+                    InlineKeyboardButton("📅 Calendar Sync (/event)", callback_data="btn_event_help"),
+                ],
+                [
                     InlineKeyboardButton("📥 របៀបទាញយកវីដេអូ", callback_data="btn_video_help"),
                     InlineKeyboardButton("🎧 ស្វែងរកចម្រៀង MP3", callback_data="btn_music_help"),
                 ],
@@ -371,6 +375,10 @@ def get_main_menu_keyboard(chat_id: int, page: int = 1) -> InlineKeyboardMarkup:
                     InlineKeyboardButton("🗜️ File Master (/compress)", callback_data="btn_compress_help"),
                 ],
                 [
+                    InlineKeyboardButton("📝 រូបភាព ➔ Word (.docx)", callback_data="btn_word_help"),
+                    InlineKeyboardButton("📊 រូបភាព ➔ Excel (.xlsx)", callback_data="btn_excel_help"),
+                ],
+                [
                     InlineKeyboardButton("🌐 បកប្រែ Pro (/translate)", callback_data="btn_translate_help"),
                     InlineKeyboardButton("✍️ ពិនិត្យអក្ខរាវិរុទ្ធ", callback_data="btn_check_help"),
                 ],
@@ -396,6 +404,10 @@ def get_main_menu_keyboard(chat_id: int, page: int = 1) -> InlineKeyboardMarkup:
                 [
                     InlineKeyboardButton("💧 ដាក់ Watermark", callback_data="btn_photo_watermark_help"),
                     InlineKeyboardButton("✂️ កាត់ Background (/rembg)", callback_data="btn_photo_rembg_help"),
+                ],
+                [
+                    InlineKeyboardButton("🔍 ស្កេន Link បោក (/scan)", callback_data="btn_scam_help"),
+                    InlineKeyboardButton("📧 អ៊ីមែល 10-Min (/mail)", callback_data="btn_tempmail"),
                 ],
                 [
                     InlineKeyboardButton("🚗 ធ្វើដំណើរ & ឡាន (/trip)", callback_data="btn_trip_menu"),
@@ -2534,6 +2546,46 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
     try:
         tg_file = await context.bot.get_file(photo.file_id)
         img_bytes = bytes(await tg_file.download_as_bytearray())
+        context.user_data["last_photo_bytes"] = img_bytes
+
+        # Check if caption requests Word or Excel conversion
+        if any(k in caption_lower for k in ["/word", "/docx", "word", "docx", "បម្លែងជា word"]):
+            status = await update.message.reply_text("📝 *កំពុងស្កេន OCR និងបម្លែងរូបភាពជាឯកសារ Word (.docx)...*", parse_mode="Markdown")
+            await update.message.chat.send_action("upload_document")
+            from services.doc_converter_service import convert_image_to_docx
+            import io
+            docx_bytes, filename, summary = await convert_image_to_docx(img_bytes)
+            if docx_bytes:
+                await update.message.reply_document(
+                    document=io.BytesIO(docx_bytes),
+                    filename=filename,
+                    caption=f"📝 *បានបម្លែងជា Word (.docx) ជោគជ័យ!* ✨\n\n_{summary}_\n\n🤖 Smart Assistant Bot 🚀",
+                    parse_mode="Markdown"
+                )
+                try:
+                    await status.delete()
+                except Exception:
+                    pass
+                return
+
+        if any(k in caption_lower for k in ["/excel", "/sheet", "/xlsx", "excel", "sheet", "xlsx", "បម្លែងជា excel"]):
+            status = await update.message.reply_text("📊 *កំពុងស្កេនតារាង និងបម្លែងរូបភាពជា Excel (.xlsx)...*", parse_mode="Markdown")
+            await update.message.chat.send_action("upload_document")
+            from services.doc_converter_service import convert_image_to_xlsx
+            import io
+            xlsx_bytes, filename, summary = await convert_image_to_xlsx(img_bytes)
+            if xlsx_bytes:
+                await update.message.reply_document(
+                    document=io.BytesIO(xlsx_bytes),
+                    filename=filename,
+                    caption=f"📊 *បានបម្លែងជា Excel (.xlsx) ជោគជ័យ!* ✨\n\n_{summary}_\n\n🤖 Smart Assistant Bot 🚀",
+                    parse_mode="Markdown"
+                )
+                try:
+                    await status.delete()
+                except Exception:
+                    pass
+                return
         
         # 1. First priority: Check for hardware EXIF GPS metadata in photo
         gps_coords = extract_gps_from_image_bytes(img_bytes)
@@ -2801,6 +2853,10 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
         buttons = []
         if maps_url:
             buttons.append([InlineKeyboardButton("🗺️ បើកមើលលើ Google Maps", url=maps_url)])
+        buttons.append([
+            InlineKeyboardButton("📝 បម្លែង Word (.docx)", callback_data="btn_photo_to_docx"),
+            InlineKeyboardButton("📊 បម្លែង Excel (.xlsx)", callback_data="btn_photo_to_xlsx"),
+        ])
         buttons.append([
             InlineKeyboardButton("🔍 ធ្វើឱ្យច្បាស់ HD", callback_data="btn_photo_enhance_help"),
             InlineKeyboardButton("🧹 សម្អាតសារ", callback_data="btn_clean_chat")
@@ -4571,6 +4627,204 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
             ])
             await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_photo_to_docx":
+            img_bytes = context.user_data.get("last_photo_bytes")
+            if not img_bytes:
+                await query.answer("⚠️ សូមផ្ញើរូបភាព ឬថតរូបឯកសារចូល Bot ជាមុនសិនណា៎!", show_alert=True)
+            else:
+                await query.answer("📝 កំពុងបម្លែងជា Word (.docx)...")
+                await context.bot.send_chat_action(chat_id=chat_id, action="upload_document")
+                from services.doc_converter_service import convert_image_to_docx
+                import io
+                docx_bytes, filename, summary = await convert_image_to_docx(img_bytes)
+                if docx_bytes:
+                    await context.bot.send_document(
+                        chat_id=chat_id,
+                        document=io.BytesIO(docx_bytes),
+                        filename=filename,
+                        caption=f"📝 *បានបម្លែងជា Word (.docx) ជោគជ័យ!* ✨\n\n_{summary}_\n\n🤖 Smart Assistant Bot 🚀",
+                        parse_mode="Markdown"
+                    )
+                else:
+                    await context.bot.send_message(chat_id=chat_id, text="❌ មិនអាចបម្លែងជា Word បានទេ។ សូមសាកល្បងជាមួយរូបភាពច្បាស់ជាងនេះ។")
+
+        elif data == "btn_photo_to_xlsx":
+            img_bytes = context.user_data.get("last_photo_bytes")
+            if not img_bytes:
+                await query.answer("⚠️ សូមផ្ញើរូបភាពតារាង ឬវិក្កយបត្រចូល Bot ជាមុនសិនណា៎!", show_alert=True)
+            else:
+                await query.answer("📊 កំពុងបម្លែងជា Excel (.xlsx)...")
+                await context.bot.send_chat_action(chat_id=chat_id, action="upload_document")
+                from services.doc_converter_service import convert_image_to_xlsx
+                import io
+                xlsx_bytes, filename, summary = await convert_image_to_xlsx(img_bytes)
+                if xlsx_bytes:
+                    await context.bot.send_document(
+                        chat_id=chat_id,
+                        document=io.BytesIO(xlsx_bytes),
+                        filename=filename,
+                        caption=f"📊 *បានបម្លែងជា Excel (.xlsx) ជោគជ័យ!* ✨\n\n_{summary}_\n\n🤖 Smart Assistant Bot 🚀",
+                        parse_mode="Markdown"
+                    )
+                else:
+                    await context.bot.send_message(chat_id=chat_id, text="❌ មិនអាចបម្លែងជា Excel បានទេ។ សូមសាកល្បងជាមួយរូបភាពច្បាស់ជាងនេះ។")
+
+        elif data == "btn_event_help":
+            await query.answer()
+            tip = (
+                "📅 *[Google Calendar Auto-Sync - ការណែនាំ]* ✨\n\n"
+                "គ្រាន់តែប្រាប់ Bot ពីការណាត់ជួបជាភាសាខ្មែរធម្មតា ➔ AI នឹងរៀបចំ Event ចូល Google Calendar និងដាស់តឿនមុន ៦០ នាទីដោយស្វ័យប្រវត្តិ!\n\n"
+                "👉 *របៀបប្រើប្រាស់៖*\n"
+                "វាយ៖ `/event <ព័ត៌មានណាត់ជួប>` ឬ `/schedule <ព័ត៌មាន>`\n\n"
+                "• ឧទាហរណ៍៖ `/event ស្អែកម៉ោង ២ រសៀល ណាត់ជួបអតិថិជននៅ Brown Bokor`\n"
+                "• ឧទាហរណ៍៖ `/event ថ្ងៃចន្ទសប្តាហ៍ក្រោយ ម៉ោង 9:00 ព្រឹក ប្រជុំគម្រោងក្រុមហ៊ុន`\n"
+                "• ឧទាហរណ៍៖ `/event ថ្ងៃទី 28 ខែវិច្ឆិកា ម៉ោង 7 យប់ ញ៉ាំបាយជុំគ្នា`\n\n"
+                "⚡ *លក្ខណៈពិសេស៖* មានប៊ូតុងចុច ១ ដងចូល Google Calendar ផ្ទាល់ និងផ្ញើឯកសារ .ICS សម្រាប់ iPhone/Android!"
+            )
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]])
+            await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_word_help":
+            await query.answer()
+            tip = (
+                "📝 *[រូបថតឯកសារ ➔ Microsoft Word (.docx)]* ✨\n\n"
+                "បម្លែងរូបថតក្រដាសឯកសារ សៀវភៅ ឬអត្ថបទឱ្យក្លាយជា File Word ដែលអាច Edit បាន មិនបាច់អង្គុយវាយឡើងវិញ!\n\n"
+                "👉 *របៀបប្រើប្រាស់៖*\n"
+                "1️⃣ ថតរូប ឬផ្ញើរូបភាពឯកសារចូល Bot\n"
+                "2️⃣ ភ្ជាប់ Caption ឬ Reply លើរូបនោះដោយវាយ៖ `/word` ឬ `/docx`\n"
+                "   (ឬចុចប៊ូតុង *📝 បម្លែង Word* ក្រោមរូបភាព)\n\n"
+                "📂 Bot នឹងផ្ញើចេញជា File `.docx` ស្អាតកម្រិត Professional ភ្លាមៗ!"
+            )
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]])
+            await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_excel_help":
+            await query.answer()
+            tip = (
+                "📊 *[រូបថតតារាង / វិក្កយបត្រ ➔ Microsoft Excel (.xlsx)]* ✨\n\n"
+                "ស្កេនទាញយកតារាងលេខ វិក្កយបត្រ ឬតារាងទំនិញពីរូបថត បម្លែងទៅជា File Excel មានជួរឈរនិងជួរដេកត្រឹមត្រូវ!\n\n"
+                "👉 *របៀបប្រើប្រាស់៖*\n"
+                "1️⃣ ផ្ញើរូបថតតារាង ឬវិក្កយបត្រចូល Bot\n"
+                "2️⃣ ភ្ជាប់ Caption ឬ Reply លើរូបនោះដោយវាយ៖ `/sheet`\n"
+                "   (ឬចុចប៊ូតុង *📊 បម្លែង Excel* ក្រោមរូបភាព)\n\n"
+                "📂 Bot នឹងផ្ញើចេញជា File `.xlsx` ដែលអាចបើកក្នុង Excel ឬ Google Sheets បានភ្លាមៗ!"
+            )
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]])
+            await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_shorts_help":
+            await query.answer()
+            tip = (
+                "✂️ *[Viral Shorts Auto-Clipper - កាត់វីដេអូខ្លី]* 🎬\n\n"
+                "ដាក់ Link វីដេអូ YouTube វែង ➔ AI ស្វែងរកវិនាទីដែលជក់ចិត្តបំផុត រួចកាត់ជាវីដេអូខ្លី ៣០ ទៅ ៦០ វិនាទីសម្រាប់ TikTok/Reels!\n\n"
+                "👉 *របៀបប្រើប្រាស់៖*\n"
+                "វាយ៖ `/shorts <Link YouTube>` ឬ `/clip <Link YouTube>`\n\n"
+                "• ឧទាហរណ៍៖ `/shorts https://www.youtube.com/watch?v=...`\n"
+                "💡 _ឬគ្រាន់តែ Reply លើសារដែលមាន Link វីដេអូ ដោយវាយ:_ `/shorts`"
+            )
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]])
+            await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_scam_help":
+            await query.answer()
+            tip = (
+                "🔍 *[Phishing & Scam Link Scanner - ស្កេន Link បោក]* 🛡️\n\n"
+                "ត្រួតពិនិត្យសុវត្ថិភាពតំណភ្ជាប់ (Link) គេហទំព័របោកប្រាស់ លួចគណនី Telegram ឬមេរោគ APK ធនាគារក្លែងក្លាយ!\n\n"
+                "👉 *របៀបប្រើប្រាស់៖*\n"
+                "• វាយ៖ `/scan <Link ឬអត្ថបទសារ>`\n"
+                "• ឧទាហរណ៍៖ `/scan https://aba-fake-login.com`\n"
+                "💡 _ឬគ្រាន់តែ Forward សារគួរឱ្យសង្ស័យចូលក្នុង Bot នេះ!_"
+            )
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]])
+            await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
+
+        elif data == "btn_tempmail" or data == "mail_refresh":
+            await query.answer("កំពុងពិនិត្យសារ...")
+            from services.temp_mail_service import check_inbox, get_current_email, generate_temp_email
+            email = get_current_email(chat_id)
+            if not email:
+                email = await generate_temp_email(chat_id)
+
+            success, curr_email, messages = await check_inbox(chat_id)
+            
+            kb_rows = [
+                [
+                    InlineKeyboardButton("🔄 ពិនិត្យសារថ្មី (Check Inbox)", callback_data="mail_refresh"),
+                    InlineKeyboardButton("🆕 បង្កើត Email ថ្មី", callback_data="mail_new"),
+                ]
+            ]
+
+            if messages:
+                mail_list_text = "📬 *សារដែលបានទទួលក្នុង Inbox៖*\n\n"
+                for idx, m in enumerate(messages[:5], 1):
+                    sender = m.get("from", "Unknown")[:25]
+                    subject = m.get("subject", "No subject")[:30]
+                    mid = m.get("id")
+                    mail_list_text += f"{idx}. 📩 *ពី:* `{sender}`\n   📌 *កម្មវត្ថុ:* {subject}\n\n"
+                    kb_rows.append([InlineKeyboardButton(f"📖 អានសារ #{idx}: {subject[:20]}", callback_data=f"mail_read_{mid}")])
+            else:
+                mail_list_text = "📭 *Inbox ទំនេរ (មិនទាន់មានសារថ្មីនៅឡើយទេ)*\n_នៅពេលមានគេផ្ញើអ៊ីមែល ឬកូដ OTP មក វានឹងបង្ហាញនៅទីនេះភ្លាមៗ!_"
+
+            text = (
+                "📧 *[10-Minute Disposable Email - អ៊ីមែលបណ្តោះអាសន្ន]* 🛡️\n\n"
+                f"📬 *អាសយដ្ឋាន Email របស់អ្នក៖*\n`{curr_email}`\n\n"
+                "💡 _ចុចលើ Email ខាងលើដើម្បី Copy យកទៅចុះឈ្មោះ ឬទទួលកូដ OTP ដោយមិនបារម្ភរឿង Spam ក្នុង Email ពិតប្រាកដ!_\n\n"
+                f"{mail_list_text}"
+            )
+            kb_rows.append([InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")])
+            await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(kb_rows), parse_mode="Markdown")
+
+        elif data == "mail_new":
+            await query.answer("កំពុងបង្កើត Email ថ្មី...")
+            from services.temp_mail_service import generate_temp_email
+            new_email = await generate_temp_email(chat_id)
+            text = (
+                "📧 *[10-Minute Disposable Email - អ៊ីមែលបណ្តោះអាសន្ន]* 🛡️\n\n"
+                f"📬 *អាសយដ្ឋាន Email ថ្មីរបស់អ្នក៖*\n`{new_email}`\n\n"
+                "💡 _ចុចលើ Email ខាងលើដើម្បី Copy យកទៅចុះឈ្មោះ ឬទទួលកូដ OTP ភ្លាមៗ!_\n\n"
+                "📭 *Inbox ទំនេរ (មិនទាន់មានសារថ្មី)*"
+            )
+            kb = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("🔄 ពិនិត្យសារថ្មី (Check Inbox)", callback_data="mail_refresh"),
+                    InlineKeyboardButton("🆕 បង្កើត Email ថ្មី", callback_data="mail_new"),
+                ],
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await query.edit_message_text(text=text, reply_markup=kb, parse_mode="Markdown")
+
+        elif data.startswith("mail_read_"):
+            await query.answer("កំពុងអានសារ...")
+            msg_id = int(data.replace("mail_read_", ""))
+            from services.temp_mail_service import fetch_message_content
+            ok, mdata = await fetch_message_content(chat_id, msg_id)
+            if ok:
+                sender = mdata.get("from", "Unknown")
+                subject = mdata.get("subject", "No subject")
+                date = mdata.get("date", "")
+                otp = mdata.get("extracted_otp")
+                body = (mdata.get("textBody") or mdata.get("body") or "")[:800]
+
+                otp_banner = f"🔑 *កូដផ្ទៀងផ្ទាត់ (OTP Code)៖* `{otp}` ⚡\n\n" if otp else ""
+
+                mail_read_text = (
+                    "📩 *[ខ្លឹមសារអ៊ីមែលដែលបានទទួល]* ✨\n\n"
+                    f"{otp_banner}"
+                    f"👤 *ពី:* `{sender}`\n"
+                    f"📌 *កម្មវត្ថុ:* `{subject}`\n"
+                    f"🕒 *កាលបរិច្ឆេទ:* `{date}`\n\n"
+                    "📄 *ខ្លឹមសារសារ៖*\n"
+                    f"```\n{body}\n```"
+                )
+            else:
+                mail_read_text = "❌ មិនអាចទាញយកខ្លឹមសារសារនេះបានទេ។"
+
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📬 ត្រឡប់ទៅ Inbox", callback_data="btn_tempmail")],
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await query.edit_message_text(text=mail_read_text, reply_markup=kb, parse_mode="Markdown")
     except Exception as e:
         logger.warning(f"Callback error: {e}")
         try:
@@ -4979,4 +5233,325 @@ async def persona_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ])
     await send_clean_response(update, context, msg, reply_markup=kb, parse_mode="Markdown")
+
+# -------------------------------------------------------------
+# Level Master: Next-Gen AI Superpower Command Handlers
+# -------------------------------------------------------------
+
+async def event_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Parse natural language schedule and auto-sync with Google Calendar & 60-min advance reminder: /event <text>."""
+    chat = update.effective_chat
+    user_text = " ".join(context.args) if context.args else ""
+    if not user_text and update.message and update.message.reply_to_message:
+        user_text = update.message.reply_to_message.text or update.message.reply_to_message.caption or ""
+
+    if not user_text:
+        tip = (
+            "📅 *[Google Calendar Auto-Sync - ការណែនាំ]* ✨\n\n"
+            "គ្រាន់តែប្រាប់ Bot ពីការណាត់ជួបជាភាសាខ្មែរធម្មតា ➔ AI នឹងរៀបចំ Event ចូល Google Calendar និងដាស់តឿនមុន ៦០ នាទីដោយស្វ័យប្រវត្តិ!\n\n"
+            "👉 *របៀបប្រើប្រាស់៖*\n"
+            "វាយ៖ `/event <ព័ត៌មានណាត់ជួប>` ឬ `/schedule <ព័ត៌មាន>`\n\n"
+            "• ឧទាហរណ៍៖ `/event ស្អែកម៉ោង ២ រសៀល ណាត់ជួបអតិថិជននៅ Brown Bokor`\n"
+            "• ឧទាហរណ៍៖ `/event ថ្ងៃចន្ទសប្តាហ៍ក្រោយ ម៉ោង 9:00 ព្រឹក ប្រជុំគម្រោងក្រុមហ៊ុន`\n"
+            "• ឧទាហរណ៍៖ `/event ថ្ងៃទី 28 ខែវិច្ឆិកា ម៉ោង 7 យប់ ញ៉ាំបាយជុំគ្នា`\n\n"
+            "💡 _ឬគ្រាន់តែ Reply លើសារណាមួយដោយវាយពាក្យ:_ `/event`"
+        )
+        await safe_reply_text(update.message, tip)
+        return
+
+    status_msg = await update.message.reply_text("🧠 *AI កំពុងវិភាគ និងរៀបចំ Event ចូល Calendar...*", parse_mode="Markdown")
+    await update.message.chat.send_action("typing")
+
+    try:
+        from services.calendar_service import parse_and_create_calendar_event
+        import io
+        ok, msg_text, gcal_url, ics_str = await parse_and_create_calendar_event(user_text, chat.id)
+        if not ok:
+            await safe_edit_text(status_msg, msg_text)
+            return
+
+        buttons = []
+        if gcal_url:
+            buttons.append([InlineKeyboardButton("📅 បញ្ចូលក្នុង Google Calendar ភ្លាមៗ", url=gcal_url)])
+        buttons.append([InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")])
+
+        await safe_edit_text(status_msg, msg_text, reply_markup=InlineKeyboardMarkup(buttons))
+
+        # Send .ICS file for Apple/Outlook/Google 1-tap import
+        if ics_str:
+            ics_file = io.BytesIO(ics_str.encode("utf-8"))
+            ics_file.name = "event_invite.ics"
+            await update.message.reply_document(
+                document=ics_file,
+                filename="event_invite.ics",
+                caption="📎 *ឯកសារប្រតិទិន iCalendar (.ICS)*\n_ចុចលើ File នេះដើម្បី Add ចូល Calendar លើទូរស័ព្ទភ្លាមៗ!_",
+                parse_mode="Markdown"
+            )
+    except Exception as e:
+        logger.error(f"Error in event_command: {e}")
+        await safe_edit_text(status_msg, f"❌ កំហុសបច្ចេកទេស៖ {str(e)[:120]}")
+
+async def word_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Convert photo / scanned document into editable Microsoft Word (.docx): /word."""
+    chat = update.effective_chat
+    img_bytes = None
+
+    # Check if photo attached directly
+    if update.message.photo:
+        photo = update.message.photo[-1]
+        tg_file = await context.bot.get_file(photo.file_id)
+        img_bytes = bytes(await tg_file.download_as_bytearray())
+    # Check if replied to a photo
+    elif update.message.reply_to_message and update.message.reply_to_message.photo:
+        photo = update.message.reply_to_message.photo[-1]
+        tg_file = await context.bot.get_file(photo.file_id)
+        img_bytes = bytes(await tg_file.download_as_bytearray())
+    # Check cached last photo
+    elif context.user_data.get("last_photo_bytes"):
+        img_bytes = context.user_data.get("last_photo_bytes")
+
+    if not img_bytes:
+        tip = (
+            "📝 *[Smart Document Converter - រូបថត ➔ Word (.docx)]* ✨\n\n"
+            "បម្លែងរូបថតក្រដាសឯកសារ សៀវភៅ ឬអត្ថបទឱ្យក្លាយជា File Word ដែលអាច Edit បាន មិនបាច់អង្គុយវាយឡើងវិញ!\n\n"
+            "👉 *របៀបប្រើប្រាស់៖*\n"
+            "• ផ្ញើរូបភាពដោយភ្ជាប់ Caption៖ `/word` ឬ `/docx`\n"
+            "• ឬគ្រាន់តែ Reply លើរូបថតឯកសារដោយវាយពាក្យ៖ `/word`"
+        )
+        await safe_reply_text(update.message, tip)
+        return
+
+    status_msg = await update.message.reply_text("📝 *AI កំពុងស្កេន OCR និងរៀបចំឯកសារ Word (.docx)...*\nសូមរង់ចាំបន្តិចណា៎! 🚀", parse_mode="Markdown")
+    await update.message.chat.send_action("upload_document")
+
+    try:
+        from services.doc_converter_service import convert_image_to_docx
+        import io
+        docx_bytes, filename, summary = await convert_image_to_docx(img_bytes)
+        if docx_bytes:
+            await update.message.reply_document(
+                document=io.BytesIO(docx_bytes),
+                filename=filename,
+                caption=f"📝 *បានបម្លែងជា Word (.docx) ជោគជ័យ!* ✨\n\n_{summary}_\n\n🤖 Smart Assistant Bot 🚀",
+                parse_mode="Markdown"
+            )
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+        else:
+            await safe_edit_text(status_msg, f"❌ {summary}")
+    except Exception as e:
+        logger.error(f"Error in word_command: {e}")
+        await safe_edit_text(status_msg, f"❌ កំហុសក្នុងការបម្លែងជា Word៖ {str(e)[:120]}")
+
+async def sheet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Convert photo / receipt / table into editable Microsoft Excel (.xlsx): /sheet."""
+    chat = update.effective_chat
+    img_bytes = None
+
+    if update.message.photo:
+        photo = update.message.photo[-1]
+        tg_file = await context.bot.get_file(photo.file_id)
+        img_bytes = bytes(await tg_file.download_as_bytearray())
+    elif update.message.reply_to_message and update.message.reply_to_message.photo:
+        photo = update.message.reply_to_message.photo[-1]
+        tg_file = await context.bot.get_file(photo.file_id)
+        img_bytes = bytes(await tg_file.download_as_bytearray())
+    elif context.user_data.get("last_photo_bytes"):
+        img_bytes = context.user_data.get("last_photo_bytes")
+
+    if not img_bytes:
+        tip = (
+            "📊 *[Smart Table OCR - រូបថតតារាង ➔ Excel (.xlsx)]* ✨\n\n"
+            "ស្កេនទាញយកតារាងលេខ វិក្កយបត្រ ឬបញ្ជីទំនិញពីរូបថត បម្លែងទៅជា File Excel មានជួរឈរនិងជួរដេកត្រឹមត្រូវ!\n\n"
+            "👉 *របៀបប្រើប្រាស់៖*\n"
+            "• ផ្ញើរូបភាពដោយភ្ជាប់ Caption៖ `/sheet`\n"
+            "• ឬគ្រាន់តែ Reply លើរូបថតតារាងដោយវាយពាក្យ:_ `/sheet`"
+        )
+        await safe_reply_text(update.message, tip)
+        return
+
+    status_msg = await update.message.reply_text("📊 *AI កំពុងស្កេនទិន្នន័យ និងរៀបចំ File Excel (.xlsx)...*\nសូមរង់ចាំបន្តិចណា៎! 🚀", parse_mode="Markdown")
+    await update.message.chat.send_action("upload_document")
+
+    try:
+        from services.doc_converter_service import convert_image_to_xlsx
+        import io
+        xlsx_bytes, filename, summary = await convert_image_to_xlsx(img_bytes)
+        if xlsx_bytes:
+            await update.message.reply_document(
+                document=io.BytesIO(xlsx_bytes),
+                filename=filename,
+                caption=f"📊 *បានបម្លែងជា Excel (.xlsx) ជោគជ័យ!* ✨\n\n_{summary}_\n\n🤖 Smart Assistant Bot 🚀",
+                parse_mode="Markdown"
+            )
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+        else:
+            await safe_edit_text(status_msg, f"❌ {summary}")
+    except Exception as e:
+        logger.error(f"Error in sheet_command: {e}")
+        await safe_edit_text(status_msg, f"❌ កំហុសក្នុងការបម្លែងជា Excel៖ {str(e)[:120]}")
+
+async def shorts_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Automatically find and clip the most viral 30-60 second hook from YouTube video: /shorts <url>."""
+    url = " ".join(context.args) if context.args else ""
+    if not url and update.message and update.message.reply_to_message:
+        candidate = update.message.reply_to_message.text or update.message.reply_to_message.caption or ""
+        from services.video_downloader import extract_video_url
+        url = extract_video_url(candidate) or ""
+
+    if not url:
+        from services.video_downloader import extract_video_url
+        url = extract_video_url(update.message.text or "") or ""
+
+    if not url:
+        tip = (
+            "✂️ *[Viral Shorts Auto-Clipper - កាត់វីដេអូខ្លី]* 🎬\n\n"
+            "ដាក់ Link វីដេអូ YouTube វែង ➔ AI ស្វែងរកវិនាទីដែលជក់ចិត្តបំផុត រួចកាត់ជាវីដេអូខ្លី ៣០ ទៅ ៦០ វិនាទីសម្រាប់ TikTok/Reels!\n\n"
+            "👉 *របៀបប្រើប្រាស់៖*\n"
+            "`/shorts <Link YouTube>` ឬ `/clip <Link YouTube>`\n\n"
+            "• ឧទាហរណ៍៖ `/shorts https://www.youtube.com/watch?v=...`\n"
+            "💡 _ឬគ្រាន់តែ Reply លើសារដែលមាន Link វីដេអូ ដោយវាយពាក្យ:_ `/shorts`"
+        )
+        await safe_reply_text(update.message, tip)
+        return
+
+    status_msg = await update.message.reply_text(
+        "🧠 *AI កំពុងស្កេនរកឈុតឆាកល្អបំផុត និង Render វីដេអូខ្លី Viral Shorts...*\n"
+        "សូមរង់ចាំប្រហែល ១៥ ទៅ ៣០ វិនាទី! 🚀",
+        parse_mode="Markdown"
+    )
+    await update.message.chat.send_action("upload_video")
+
+    try:
+        from services.shorts_clipper_service import auto_clip_viral_shorts
+        ok, clip_path, hook_title, meta = await auto_clip_viral_shorts(url)
+        if not ok or not clip_path or not os.path.exists(clip_path):
+            await safe_edit_text(status_msg, hook_title)
+            return
+
+        caption = (
+            f"✂️ *[Viral Short Clip រួចរាល់!]* 🎬\n\n"
+            f"🔥 *ចំណងជើង:* **{hook_title}**\n"
+            f"🕒 *ចន្លោះពេល:* `{meta.get('start_time')} - {meta.get('end_time')}` ({meta.get('clip_duration')} វិនាទី)\n"
+            f"💡 *មូលហេតុទាក់ទាញ:* _{meta.get('viral_reason')}_\n\n"
+            f"✨ រួចរាល់សម្រាប់យកទៅបង្ហោះលើ TikTok & Facebook Reels! 🚀"
+        )
+
+        with open(clip_path, "rb") as vf:
+            await update.message.reply_video(
+                video=vf,
+                caption=caption,
+                parse_mode="Markdown"
+            )
+
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+        try:
+            os.remove(clip_path)
+        except Exception:
+            pass
+
+    except Exception as e:
+        logger.error(f"Error in shorts_command: {e}")
+        await safe_edit_text(status_msg, f"❌ កំហុសក្នុងការកាត់វីដេអូ Viral Shorts៖ {str(e)[:120]}")
+
+async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Scan suspicious link, URL, or forwarded message for phishing, scams, and banking malware: /scan <target>."""
+    target = " ".join(context.args) if context.args else ""
+    if not target and update.message and update.message.reply_to_message:
+        target = update.message.reply_to_message.text or update.message.reply_to_message.caption or ""
+
+    if not target:
+        tip = (
+            "🔍 *[Phishing & Scam Link Scanner - ស្កេន Link បោក]* 🛡️\n\n"
+            "ត្រួតពិនិត្យសុវត្ថិភាពតំណភ្ជាប់ (Link) គេហទំព័របោកប្រាស់ លួចគណនី Telegram ឬមេរោគ APK ធនាគារក្លែងក្លាយ!\n\n"
+            "👉 *របៀបប្រើប្រាស់៖*\n"
+            "• វាយ៖ `/scan <Link ឬអត្ថបទសារ>`\n"
+            "• ឧទាហរណ៍៖ `/scan https://aba-fake-login.com`\n"
+            "• ឧទាហរណ៍៖ `/scan ចូលរួមបោះឆ្នោតឈ្នះរង្វាន់ $500`\n\n"
+            "💡 _ឬគ្រាន់តែ Forward សារគួរឱ្យសង្ស័យចូលក្នុង Bot រួចវាយ:_ `/scan`"
+        )
+        await safe_reply_text(update.message, tip)
+        return
+
+    status_msg = await update.message.reply_text("🔍 *កំពុងស្កេនវិភាគសុវត្ថិភាព Link និងត្រួតពិនិត្យ Phishing/Scam...* 🛡️", parse_mode="Markdown")
+    await update.message.chat.send_action("typing")
+
+    try:
+        from services.scam_scanner_service import scan_link_or_text
+        report = await scan_link_or_text(target)
+
+        score_bar = "🟢" if report["risk_score"] < 25 else ("🟡" if report["risk_score"] < 60 else "🔴")
+        reasons_text = "\n".join([f"• {r}" for r in report["reasons"]]) if report["reasons"] else "• ពុំមានសញ្ញាហានិភ័យបច្ចេកទេសត្រូវបានរកឃើញឡើយ"
+
+        msg = (
+            f"🛡️ *[លទ្ធផលស្កេនសុវត្ថិភាពឌីជីថល]* ✨\n\n"
+            f"📊 *ស្ថានភាព៖* {report['status_label']}\n"
+            f"🎯 *ពិន្ទុហានិភ័យ (Risk Score)៖* {score_bar} `{report['risk_score']} / 100`\n"
+            f"🌐 *Domain/Target:* `{report['domain']}`\n\n"
+            f"🔍 *កត្តាហានិភ័យដែលបានរកឃើញ៖*\n{reasons_text}\n\n"
+            f"🧠 *ការវាយតម្លៃរបស់ AI៖*\n_{report['ai_verdict']}_\n\n"
+            f"💡 *អនុសាសន៍ការពារ៖*\n{report['advice']}\n\n"
+            f"📌 *ចំណាំបន្ថែម៖* {report['safety_tip']}"
+        )
+
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]])
+        await safe_edit_text(status_msg, msg, reply_markup=kb)
+
+    except Exception as e:
+        logger.error(f"Error in scan_command: {e}")
+        await safe_edit_text(status_msg, f"❌ កំហុសក្នុងការស្កេន៖ {str(e)[:120]}")
+
+async def tempmail_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Manage 10-minute temporary disposable email for receiving verification OTPs: /tempmail or /mail."""
+    chat = update.effective_chat
+    await update.message.chat.send_action("typing")
+
+    try:
+        from services.temp_mail_service import get_current_email, generate_temp_email, check_inbox
+        email = get_current_email(chat.id)
+        if not email:
+            email = await generate_temp_email(chat.id)
+
+        success, curr_email, messages = await check_inbox(chat.id)
+
+        kb_rows = [
+            [
+                InlineKeyboardButton("🔄 ពិនិត្យសារថ្មី (Check Inbox)", callback_data="mail_refresh"),
+                InlineKeyboardButton("🆕 បង្កើត Email ថ្មី", callback_data="mail_new"),
+            ]
+        ]
+
+        if messages:
+            mail_list_text = "📬 *សារដែលបានទទួលក្នុង Inbox៖*\n\n"
+            for idx, m in enumerate(messages[:5], 1):
+                sender = m.get("from", "Unknown")[:25]
+                subject = m.get("subject", "No subject")[:30]
+                mid = m.get("id")
+                mail_list_text += f"{idx}. 📩 *ពី:* `{sender}`\n   📌 *កម្មវត្ថុ:* {subject}\n\n"
+                kb_rows.append([InlineKeyboardButton(f"📖 អានសារ #{idx}: {subject[:20]}", callback_data=f"mail_read_{mid}")])
+        else:
+            mail_list_text = "📭 *Inbox ទំនេរ (មិនទាន់មានសារថ្មីនៅឡើយទេ)*\n_នៅពេលមានគេផ្ញើអ៊ីមែល ឬកូដ OTP មក វានឹងបង្ហាញនៅទីនេះភ្លាមៗ!_"
+
+        text = (
+            "📧 *[10-Minute Disposable Email - អ៊ីមែលបណ្តោះអាសន្ន]* 🛡️\n\n"
+            f"📬 *អាសយដ្ឋាន Email របស់អ្នក៖*\n`{curr_email}`\n\n"
+            "💡 _ចុចលើ Email ខាងលើដើម្បី Copy យកទៅចុះឈ្មោះ ឬទទួលកូដ OTP ដោយមិនបារម្ភរឿង Spam ក្នុង Email ពិតប្រាកដ!_\n\n"
+            f"{mail_list_text}"
+        )
+        kb_rows.append([InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")])
+        await safe_reply_text(update.message, text, reply_markup=InlineKeyboardMarkup(kb_rows))
+
+    except Exception as e:
+        logger.error(f"Error in tempmail_command: {e}")
+        await safe_reply_text(update.message, f"❌ កំហុសបច្ចេកទេសក្នុងសេវាអ៊ីមែល៖ {str(e)[:120]}")
+
 

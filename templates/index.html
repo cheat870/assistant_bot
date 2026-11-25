@@ -152,6 +152,18 @@
             <p class="text-[11px] text-slate-400">ទាញយក MP3 ទាំងកញ្ចប់</p>
           </div>
         </div>
+
+        <div onclick="sendBotCommand('/shorts')" class="glass-card rounded-2xl p-3.5 flex flex-col justify-between hover:border-indigo-500/50 cursor-pointer active:scale-95 transition col-span-2">
+          <div class="flex items-center space-x-3">
+            <div class="w-8 h-8 rounded-lg bg-rose-500/20 text-rose-400 flex items-center justify-center">
+              <i class="ph-bold ph-video text-lg"></i>
+            </div>
+            <div>
+              <h3 class="text-xs font-bold text-white">Viral Shorts Auto-Clipper</h3>
+              <p class="text-[11px] text-slate-400">កាត់វីដេអូ YouTube វែង ➔ ខ្លី 30-60s សម្រាប់ TikTok/Reels (/shorts)</p>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Channel Archive Link -->
@@ -237,6 +249,26 @@
           <div>
             <h3 class="text-xs font-bold text-white">Chat with PDF</h3>
             <p class="text-[11px] text-slate-400">អាន & សង្ខេបឯកសារ PDF</p>
+          </div>
+        </div>
+
+        <div onclick="sendBotCommand('/word')" class="glass-card rounded-2xl p-3.5 flex flex-col justify-between hover:border-purple-500/50 cursor-pointer active:scale-95 transition">
+          <div class="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center mb-2">
+            <i class="ph-bold ph-file-doc text-lg"></i>
+          </div>
+          <div>
+            <h3 class="text-xs font-bold text-white">រូបភាព ➔ Word</h3>
+            <p class="text-[11px] text-slate-400">OCR បម្លែងជា .docx</p>
+          </div>
+        </div>
+
+        <div onclick="sendBotCommand('/sheet')" class="glass-card rounded-2xl p-3.5 flex flex-col justify-between hover:border-purple-500/50 cursor-pointer active:scale-95 transition">
+          <div class="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center mb-2">
+            <i class="ph-bold ph-table text-lg"></i>
+          </div>
+          <div>
+            <h3 class="text-xs font-bold text-white">រូបភាព ➔ Excel</h3>
+            <p class="text-[11px] text-slate-400">ស្កេនតារាងជា .xlsx</p>
           </div>
         </div>
       </div>
@@ -366,6 +398,24 @@
             <span class="text-blue-400 block text-sm mb-1"><i class="ph-bold ph-drop"></i></span>
             <span class="font-bold text-white block">ដាក់ Watermark</span>
             <span class="text-[11px] text-slate-400">ការពាររូបទំនិញ</span>
+          </button>
+
+          <button onclick="sendBotCommand('/event')" class="bg-slate-900/80 hover:bg-slate-800 p-2.5 rounded-xl border border-slate-800 text-left transition">
+            <span class="text-indigo-400 block text-sm mb-1"><i class="ph-bold ph-calendar-plus"></i></span>
+            <span class="font-bold text-white block">Google Calendar</span>
+            <span class="text-[11px] text-slate-400">ដាស់មុន 60m (/event)</span>
+          </button>
+
+          <button onclick="sendBotCommand('/scan')" class="bg-slate-900/80 hover:bg-slate-800 p-2.5 rounded-xl border border-slate-800 text-left transition">
+            <span class="text-rose-400 block text-sm mb-1"><i class="ph-bold ph-shield-warning"></i></span>
+            <span class="font-bold text-white block">ស្កេន Link បោក</span>
+            <span class="text-[11px] text-slate-400">Phishing & Scam (/scan)</span>
+          </button>
+
+          <button onclick="sendBotCommand('/mail')" class="bg-slate-900/80 hover:bg-slate-800 p-2.5 rounded-xl border border-slate-800 text-left transition col-span-2">
+            <span class="text-amber-400 inline-block text-sm mr-1"><i class="ph-bold ph-envelope"></i></span>
+            <span class="font-bold text-white">10-Minute Disposable Email</span>
+            <span class="text-[11px] text-slate-400 block">អ៊ីមែលបណ្តោះអាសន្ន ទទួល OTP (/mail)</span>
           </button>
         </div>
       </div>

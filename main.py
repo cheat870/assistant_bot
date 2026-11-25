@@ -107,6 +107,12 @@ from handlers.command_handlers import (
     gif_command,
     botserver_command,
     persona_command,
+    event_command,
+    word_command,
+    sheet_command,
+    shorts_command,
+    scan_command,
+    tempmail_command,
 )
 from handlers.video_handlers import handle_video_message, handle_media_download_callback
 
@@ -346,6 +352,22 @@ def main():
     # Persona / Role-Based Mode Handlers
     app.add_handler(CommandHandler("persona", persona_command, block=False))
     app.add_handler(CommandHandler("mode", persona_command, block=False))
+
+    # Level Master: Next-Gen AI Superpower Handlers
+    app.add_handler(CommandHandler("event", event_command, block=False))
+    app.add_handler(CommandHandler("schedule", event_command, block=False))
+    app.add_handler(CommandHandler("word", word_command, block=False))
+    app.add_handler(CommandHandler("docx", word_command, block=False))
+    app.add_handler(CommandHandler("sheet", sheet_command, block=False))
+    app.add_handler(CommandHandler("table", sheet_command, block=False))
+    app.add_handler(CommandHandler("shorts", shorts_command, block=False))
+    app.add_handler(CommandHandler("clipper", shorts_command, block=False))
+    app.add_handler(CommandHandler("clip", shorts_command, block=False))
+    app.add_handler(CommandHandler("scan", scan_command, block=False))
+    app.add_handler(CommandHandler("checklink", scan_command, block=False))
+    app.add_handler(CommandHandler("tempmail", tempmail_command, block=False))
+    app.add_handler(CommandHandler("mail", tempmail_command, block=False))
+    app.add_handler(CommandHandler("inbox", tempmail_command, block=False))
 
     # Register Callback Query Handlers for Media Downloads & Buttons
     app.add_handler(CallbackQueryHandler(handle_media_download_callback, pattern="^(dlmp3_|dlthumb_|dlqual_|dlsum_|dlsub_)", block=False))
