@@ -1,8 +1,15 @@
+import os
+import sqlite3
+import math
+import xml.etree.ElementTree as ET
 import logging
 from typing import Dict, Any, Optional
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# NCDD Official Cambodia Gazetteer Database path
+NCDD_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "cambodia_ncdd.db")
 
 # Default coordinates: Phnom Penh, Cambodia
 DEFAULT_LAT = 11.5564
@@ -36,10 +43,184 @@ HTTP_HEADERS = {
     "Accept": "application/json"
 }
 
+def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate distance in meters between two coordinates."""
+    R = 6371000
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
+async def find_nearest_road_osm(client: httpx.AsyncClient, lat: float, lon: float, radius_m: float = 250.0) -> Dict[str, Any]:
+    """Scan OpenStreetMap geometry around coordinates to find the nearest named or local road."""
+    ddeg = (radius_m / 111000.0) * 1.2
+    bbox = f"{lon-ddeg:.5f},{lat-ddeg:.5f},{lon+ddeg:.5f},{lat+ddeg:.5f}"
+    url = f"https://api.openstreetmap.org/api/0.6/map?bbox={bbox}"
+    try:
+        resp = await client.get(url, timeout=3.5)
+        if resp.status_code != 200:
+            return {"road": ""}
+
+        named_roads = []
+        unnamed_roads = []
+
+        # 1. Try parsing JSON format
+        try:
+            data = resp.json()
+            elements = data.get("elements", [])
+            nodes = {el["id"]: (float(el["lat"]), float(el["lon"])) for el in elements if el.get("type") == "node"}
+
+            for el in elements:
+                if el.get("type") != "way":
+                    continue
+                tags = el.get("tags", {})
+                if "highway" not in tags:
+                    continue
+
+                min_dist = 999999.0
+                for nd in el.get("nodes", []):
+                    if nd in nodes:
+                        nlat, nlon = nodes[nd]
+                        d = _haversine(lat, lon, nlat, nlon)
+                        if d < min_dist:
+                            min_dist = d
+
+                if min_dist > radius_m:
+                    continue
+
+                name_km = tags.get("name:km") or ""
+                name_default = tags.get("name") or ""
+                name_en = tags.get("name:en") or ""
+                ref = tags.get("ref") or ""
+                h_type = tags.get("highway") or ""
+
+                best_name = name_km or name_default or ref or name_en
+                if best_name:
+                    named_roads.append((min_dist, best_name, h_type, name_en))
+                else:
+                    unnamed_roads.append((min_dist, h_type))
+        except Exception:
+            # 2. Fallback to XML parsing
+            root = ET.fromstring(resp.content)
+            nodes = {}
+            for node in root.findall("node"):
+                nodes[node.get("id")] = (float(node.get("lat")), float(node.get("lon")))
+
+            for way in root.findall("way"):
+                tags = {t.get("k"): t.get("v") for t in way.findall("tag")}
+                if "highway" not in tags:
+                    continue
+
+                min_dist = 999999.0
+                for nd in way.findall("nd"):
+                    ref = nd.get("ref")
+                    if ref in nodes:
+                        nlat, nlon = nodes[ref]
+                        d = _haversine(lat, lon, nlat, nlon)
+                        if d < min_dist:
+                            min_dist = d
+
+                if min_dist > radius_m:
+                    continue
+
+                name_km = tags.get("name:km") or ""
+                name_default = tags.get("name") or ""
+                name_en = tags.get("name:en") or ""
+                ref = tags.get("ref") or ""
+                h_type = tags.get("highway") or ""
+
+                best_name = name_km or name_default or ref or name_en
+                if best_name:
+                    named_roads.append((min_dist, best_name, h_type, name_en))
+                else:
+                    unnamed_roads.append((min_dist, h_type))
+
+        named_roads.sort(key=lambda x: x[0])
+        unnamed_roads.sort(key=lambda x: x[0])
+
+        if named_roads:
+            closest = named_roads[0]
+            r_name = closest[1]
+            if not any(k in r_name for k in ["ផ្លូវ", "មហាវិថី", "វិថី", "Street", "St.", "Road", "Blvd"]):
+                r_name = f"ផ្លូវ {r_name}"
+            en_str = f" ({closest[3]})" if closest[3] and closest[3] != r_name else ""
+            dist_str = f" (ចម្ងាយ ~{int(closest[0])}m)" if closest[0] > 35 else ""
+            return {"road": f"{r_name}{en_str}{dist_str}", "has_named_road": True}
+        elif unnamed_roads:
+            h_type = unnamed_roads[0][1]
+            type_km = (
+                "ផ្លូវលំ / ផ្លូវបេតុងក្នុងភូមិ (គ្មានលេខផ្លូវ)"
+                if h_type in ["residential", "living_street", "service", "unclassified"]
+                else "ផ្លូវជនបទ / ផ្លូវគ្រួសក្រហម"
+            )
+            return {"road": type_km, "has_named_road": False}
+    except Exception as e:
+        logger.debug(f"OSM nearest road check exception: {e}")
+    return {"road": ""}
+
+def query_ncdd_commune_by_code(code: str) -> Optional[str]:
+    """Lookup Commune/Sangkat from official NCDD gazetteer database by 6-digit code."""
+    if not os.path.exists(NCDD_DB_PATH) or not code:
+        return None
+    try:
+        conn = sqlite3.connect(NCDD_DB_PATH)
+        cur = conn.cursor()
+        cur.execute("SELECT type_kh, name_kh FROM communes WHERE code = ?", (code,))
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            return f"{row[0]} {row[1]}".strip()
+    except Exception as e:
+        logger.debug(f"NCDD query by code error: {e}")
+    return None
+
+def query_ncdd_commune_by_village_district(village_name: str, district_name: str) -> Optional[str]:
+    """Lookup Commune from official NCDD gazetteer database by village name and district."""
+    if not os.path.exists(NCDD_DB_PATH) or not village_name:
+        return None
+    clean_v = village_name.replace("ភូមិ", "").strip()
+    clean_d = district_name.replace("ស្រុក", "").replace("ខណ្ឌ", "").replace("ក្រុង", "").strip()
+    try:
+        conn = sqlite3.connect(NCDD_DB_PATH)
+        cur = conn.cursor()
+        if clean_d:
+            cur.execute("""
+                SELECT c.type_kh, c.name_kh
+                FROM villages v
+                JOIN communes c ON v.commune_code = c.code
+                JOIN districts d ON v.district_code = d.code
+                WHERE v.name_kh LIKE ? AND d.name_kh LIKE ?
+                LIMIT 1
+            """, (f"%{clean_v}%", f"%{clean_d}%"))
+            row = cur.fetchone()
+            if row:
+                conn.close()
+                return f"{row[0]} {row[1]}".strip()
+
+        # Fallback without district
+        cur.execute("""
+            SELECT c.type_kh, c.name_kh
+            FROM villages v
+            JOIN communes c ON v.commune_code = c.code
+            WHERE v.name_kh = ?
+            LIMIT 1
+        """, (clean_v,))
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            return f"{row[0]} {row[1]}".strip()
+    except Exception as e:
+        logger.debug(f"NCDD query by village error: {e}")
+    return None
+
 async def get_detailed_cambodia_location(lat: float, lon: float) -> Dict[str, Any]:
     """
     Reverse geocode coordinates to detailed Cambodian administrative hierarchy:
-    - 🏡 ភូមិ / ផ្លូវ (Village / Road)
+    - 🏡 ភូមិ (Village / Phum)
+    - 🛣️ ផ្លូវ / ផ្លូវលេខ (Street / Road Name & Number)
     - 🏘️ សង្កាត់ / ឃុំ (Sangkat / Commune)
     - 🏢 ខណ្ឌ / ស្រុក / ក្រុង (Khan / District / Municipality)
     - 🏛️ រាជធានី / ខេត្ត (Capital / Province)
@@ -51,17 +232,17 @@ async def get_detailed_cambodia_location(lat: float, lon: float) -> Dict[str, An
     osm_addr = {}
     bdc_data = {}
 
-    async with httpx.AsyncClient(timeout=6.0, headers=headers) as client:
-        # 1. Fetch OpenStreetMap Nominatim
+    async with httpx.AsyncClient(timeout=7.0, headers=headers) as client:
+        # 1. Fetch OpenStreetMap Nominatim with zoom 18
         try:
-            url_osm = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json&accept-language=km,en"
+            url_osm = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json&accept-language=km,en&addressdetails=1&zoom=18"
             r1 = await client.get(url_osm)
             if r1.status_code == 200:
                 osm_addr = r1.json().get("address", {})
         except Exception as e:
             logger.warning(f"OSM Nominatim error: {e}")
 
-        # 2. Fetch BigDataCloud
+        # 2. Fetch BigDataCloud as complementary source
         try:
             url_bdc = f"https://api.bigdatacloud.net/data/reverse-geocode-client?latitude={lat}&longitude={lon}&localityLanguage=km"
             r2 = await client.get(url_bdc)
@@ -70,55 +251,105 @@ async def get_detailed_cambodia_location(lat: float, lon: float) -> Dict[str, An
         except Exception as e:
             logger.warning(f"BigDataCloud error: {e}")
 
-    # Extract Province / Capital (រាជធានី / ខេត្ត)
-    province = osm_addr.get("state") or bdc_data.get("principalSubdivision") or ""
-    if province:
-        if not any(k in province for k in ["រាជធានី", "ខេត្ត"]):
-            province = f"រាជធានី {province}" if "ភ្នំពេញ" in province else f"ខេត្ត {province}"
-    else:
-        province = "រាជធានីភ្នំពេញ"
+        # 3. Extract Province / Capital (រាជធានី / ខេត្ត)
+        province = osm_addr.get("state") or bdc_data.get("principalSubdivision") or ""
+        if province:
+            if not any(k in province for k in ["រាជធានី", "ខេត្ត"]):
+                province = f"រាជធានី {province}" if "ភ្នំពេញ" in province else f"ខេត្ត {province}"
+        else:
+            province = "រាជធានីភ្នំពេញ"
 
-    # Extract District / Khan (ខណ្ឌ / ស្រុក / ក្រុង)
-    district = ""
-    # Try BigDataCloud adminLevel 6
-    for adm in bdc_data.get("localityInfo", {}).get("administrative", []):
-        if adm.get("adminLevel") == 6:
-            district = adm.get("name")
-            break
-    if not district:
-        for k in ["county", "city_district", "district", "town", "city"]:
-            val = osm_addr.get(k)
-            if val and not any(bad in val.lower() for bad in ["service", "shop", "hotel", "consult", "guest"]):
-                district = val
+        # 4. Extract District / Khan / Krong (ខណ្ឌ / ស្រុក / ក្រុង)
+        district = ""
+        for adm in bdc_data.get("localityInfo", {}).get("administrative", []):
+            if adm.get("adminLevel") == 6:
+                district = adm.get("name")
                 break
-    if not district:
-        district = bdc_data.get("locality") or ""
-    if district and not any(k in district for k in ["ខណ្ឌ", "ស្រុក", "ក្រុង"]):
-        district = f"ក្រុង/ស្រុក {district}"
-    if not district:
-        district = "មិនបានបញ្ជាក់"
+        if not district:
+            for k in ["county", "city_district", "district", "town", "city"]:
+                val = osm_addr.get(k)
+                if val and not any(bad in val.lower() for bad in ["service", "shop", "hotel", "consult", "guest"]):
+                    district = val
+                    break
+        if not district:
+            district = bdc_data.get("locality") or ""
+        if district and not any(k in district for k in ["ខណ្ឌ", "ស្រុក", "ក្រុង"]):
+            district = f"ខណ្ឌ {district}" if "ភ្នំពេញ" in province else f"ស្រុក {district}"
+        if not district:
+            district = "មិនបានបញ្ជាក់"
 
-    # Extract Sangkat / Commune (សង្កាត់ / ឃុំ) and Village (ភូមិ)
-    commune = ""
-    village = ""
-    raw_v = osm_addr.get("village") or osm_addr.get("hamlet") or osm_addr.get("suburb") or osm_addr.get("neighbourhood") or ""
-    raw_q = osm_addr.get("quarter") or osm_addr.get("city_district") or ""
-    road = osm_addr.get("road") or ""
+        # 5. Extract Commune / Sangkat (សង្កាត់ / ឃុំ)
+        commune = ""
+        postcode = osm_addr.get("postcode", "")
+        if postcode and len(postcode) == 6:
+            commune_ncdd = query_ncdd_commune_by_code(postcode)
+            if commune_ncdd:
+                commune = commune_ncdd
 
-    if "សង្កាត់" in raw_v or "ឃុំ" in raw_v:
-        commune = raw_v
-    elif "សង្កាត់" in raw_q or "ឃុំ" in raw_q:
-        commune = raw_q
-    else:
-        village = raw_v
+        if not commune:
+            candidate_tags = [
+                osm_addr.get("quarter"),
+                osm_addr.get("city_district"),
+                osm_addr.get("suburb"),
+                osm_addr.get("village"),
+                osm_addr.get("hamlet"),
+                osm_addr.get("neighbourhood")
+            ]
+            for tag in candidate_tags:
+                if tag and ("សង្កាត់" in tag or "ឃុំ" in tag):
+                    commune = tag
+                    break
 
-    if not village:
-        village = road if road else "ក្បែរទីតាំងនេះ"
+        # 6. Extract Village (ភូមិ)
+        village = ""
+        hamlet = osm_addr.get("hamlet") or ""
+        if hamlet:
+            village = hamlet if hamlet.startswith("ភូមិ") else f"ភូមិ {hamlet}"
+        else:
+            v_candidates = [
+                osm_addr.get("isolated_dwelling"),
+                osm_addr.get("neighbourhood"),
+                osm_addr.get("village"),
+                osm_addr.get("suburb"),
+                osm_addr.get("quarter")
+            ]
+            for tag in v_candidates:
+                if not tag:
+                    continue
+                if "ភូមិ" in tag:
+                    village = tag
+                    break
+                elif tag != commune and not any(k in tag for k in ["សង្កាត់", "ឃុំ"]):
+                    village = f"ភូមិ {tag}" if not tag.startswith("ភូមិ") else tag
+                    break
 
-    if not commune:
-        commune = "មិនមានទិន្នន័យច្បាស់លាស់"
+        # If commune is still empty, attempt resolution via village name & district in NCDD database
+        if (not commune or commune == "មិនមានទិន្នន័យច្បាស់លាស់") and village:
+            ncdd_commune = query_ncdd_commune_by_village_district(village, district)
+            if ncdd_commune:
+                commune = ncdd_commune
+
+        if not village:
+            village = "មិនមានទិន្នន័យភូមិជាក់លាក់"
+        if not commune:
+            commune = "មិនមានទិន្នន័យច្បាស់លាស់"
+
+        # 7. Extract Road / Street (ផ្លូវ / ផ្លូវលេខ)
+        road = osm_addr.get("road") or osm_addr.get("pedestrian") or osm_addr.get("street") or ""
+        if road:
+            if not any(k in road for k in ["ផ្លូវ", "មហាវិថី", "វិថី", "Street", "St.", "Road", "Blvd"]):
+                road = f"ផ្លូវ {road}"
+        else:
+            # Check nearby named roads or alleys within 250m using OSM geometry
+            nr = await find_nearest_road_osm(client, lat, lon)
+            road = nr.get("road") or ""
+
+        if not road:
+            road = "ផ្លូវលំ / ផ្លូវក្នុងមូលដ្ឋាន (គ្មានលេខផ្លូវ)"
 
     short_name = f"{district}, {province}".strip(", ")
+    if commune and commune != "មិនមានទិន្នន័យច្បាស់លាស់":
+        short_name = f"{commune}, {short_name}"
 
     return {
         "village": village,
@@ -147,7 +378,8 @@ def format_detailed_location_message(loc_info: Dict[str, Any], weather_text: str
     province = loc_info.get("province", "រាជធានីភ្នំពេញ")
     district = loc_info.get("district", "មិនបានបញ្ជាក់")
     commune = loc_info.get("commune", "មិនមានទិន្នន័យច្បាស់លាស់")
-    village = loc_info.get("village", "ក្បែរទីតាំងនេះ")
+    village = loc_info.get("village", "មិនមានទិន្នន័យភូមិជាក់លាក់")
+    road = loc_info.get("road", "ផ្លូវលំ / ផ្លូវក្នុងមូលដ្ឋាន (គ្មានលេខផ្លូវ)")
 
     msg = (
         f"📍 *ព័ត៌មានទីតាំងជាក់ស្តែងរបស់អ្នក (Current Location)* 🇰🇭\n"
@@ -155,7 +387,8 @@ def format_detailed_location_message(loc_info: Dict[str, Any], weather_text: str
         f"🏛️ *រាជធានី / ខេត្ត៖* `{province}`\n"
         f"🏢 *ខណ្ឌ / ស្រុក / ក្រុង៖* `{district}`\n"
         f"🏘️ *សង្កាត់ / ឃុំ៖* `{commune}`\n"
-        f"🏡 *ភូមិ / ផ្លូវ៖* `{village}`\n"
+        f"🏡 *ភូមិ៖* `{village}`\n"
+        f"🛣️ *ផ្លូវ / ផ្លូវលេខ៖* `{road}`\n"
         f"📌 *កូអរដោនេ GPS៖* `{lat:.5f}, {lon:.5f}`\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"🌅 *Bot បានកំណត់ទីតាំងនេះសម្រាប់ដំណឹងអាកាសធាតុ ៥:០០ ព្រឹកជារៀងរាល់ថ្ងៃ!*\n\n"

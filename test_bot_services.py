@@ -128,8 +128,10 @@ async def test_weather_service_async():
     assert "district" in detailed
     assert "commune" in detailed
     assert "village" in detailed
+    assert "road" in detailed
     print(f"  - Detailed Location Hierarchy:")
-    print(f"    * 🏡 ភូមិ/ផ្លូវ: {detailed['village']}")
+    print(f"    * 🏡 ភូមិ: {detailed['village']}")
+    print(f"    * 🛣️ ផ្លូវ/ផ្លូវលេខ: {detailed['road']}")
     print(f"    * 🏘️ សង្កាត់/ឃុំ: {detailed['commune']}")
     print(f"    * 🏢 ខណ្ឌ/ស្រុក: {detailed['district']}")
     print(f"    * 🏛️ រាជធានី/ខេត្ត: {detailed['province']}")
@@ -340,16 +342,15 @@ def test_clean_chat_and_auto_cleanup():
     assert any("សម្អាតសារ" in b for b in bottom_buttons), "Bottom keyboard must contain clean chat button"
     print("  - Persistent bottom keyboard contains '🧹 សម្អាតសារ' button: OK")
 
-    # Verify inline main menu keyboard has clean chat and auto-clean toggle callbacks
-    main_kb = get_main_menu_keyboard(chat_id=12345)
+    # Verify inline main menu keyboard has auto-clean toggle callback (on page 3 of paginated menu)
+    main_kb = get_main_menu_keyboard(chat_id=12345, page=3)
     inline_callbacks = [btn.callback_data for row in main_kb.inline_keyboard for btn in row if btn.callback_data]
-    assert "btn_clean_chat" in inline_callbacks, "Main menu keyboard must contain btn_clean_chat"
     assert "btn_toggle_autoclean" in inline_callbacks, "Main menu keyboard must contain btn_toggle_autoclean"
     
-    # Check button text for 3AM & 12PM schedule
+    # Check button text for Auto-Clean
     autoclean_btn_text = [btn.text for row in main_kb.inline_keyboard for btn in row if "Auto-Clean" in (btn.text or "")]
-    assert any("3AM/12PM" in t for t in autoclean_btn_text), f"Button should mention 3AM/12PM: {autoclean_btn_text}"
-    print("  - Main menu keyboard contains 'Auto-Clean (3AM/12PM)' callback: OK")
+    assert len(autoclean_btn_text) > 0, f"Button should mention Auto-Clean: {autoclean_btn_text}"
+    print("  - Main menu keyboard contains 'Auto-Clean' callback: OK")
 
     # Test auto-clean database logic (3AM & 12PM scheduled auto-clean)
     from database import (

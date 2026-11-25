@@ -98,14 +98,20 @@ def format_photo_gps_message(loc: Dict[str, Any], temp_str: Optional[str] = None
     """Format full Cambodian administrative hierarchy for GPS extracted from photo."""
     lat = loc.get("lat")
     lon = loc.get("lon")
+    province = loc.get("province", "រាជធានីភ្នំពេញ")
+    district = loc.get("district", "មិនបានបញ្ជាក់")
+    commune = loc.get("commune", "មិនបានបញ្ជាក់")
+    village = loc.get("village", "មិនមានទិន្នន័យភូមិជាក់លាក់")
+    road = loc.get("road", "ផ្លូវលំ / ផ្លូវក្នុងមូលដ្ឋាន (គ្មានលេខផ្លូវ)")
     maps_url = f"https://www.google.com/maps?q={lat},{lon}"
 
     msg = (
         "📍 *បានរកឃើញទីតាំង GPS ពីរូបភាព (Photo Location Metadata)* 🛰️\n\n"
-        f"🏡 *ភូមិ / ផ្លូវ:* `{loc.get('village', 'ក្បែរទីតាំងនេះ')}`\n"
-        f"🏘️ *សង្កាត់ / ឃុំ:* `{loc.get('commune', 'មិនបានបញ្ជាក់')}`\n"
-        f"🏢 *ខណ្ឌ / ស្រុក / ក្រុង:* `{loc.get('district', 'មិនបានបញ្ជាក់')}`\n"
-        f"🏛️ *រាជធានី / ខេត្ត:* *{loc.get('province', 'រាជធានីភ្នំពេញ')}*\n\n"
+        f"🏛️ *រាជធានី / ខេត្ត៖* *{province}*\n"
+        f"🏢 *ខណ្ឌ / ស្រុក / ក្រុង៖* `{district}`\n"
+        f"🏘️ *សង្កាត់ / ឃុំ៖* `{commune}`\n"
+        f"🏡 *ភូមិ៖* `{village}`\n"
+        f"🛣️ *ផ្លូវ / ផ្លូវលេខ៖* `{road}`\n\n"
         f"🌐 *កូអរដោនេ GPS:* `{lat}, {lon}`\n"
         f"🗺️ *Google Maps:* [ចុចបើកផែនទីមើលទីតាំង]({maps_url})\n"
     )

@@ -6,6 +6,7 @@
 *.db
 *.sqlite
 *.sqlite3
+!data/cambodia_ncdd.db
 
 # Downloads and temp files
 downloads/
