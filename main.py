@@ -113,6 +113,7 @@ from handlers.command_handlers import (
     shorts_command,
     scan_command,
     tempmail_command,
+    web_builder_command,
 )
 from handlers.video_handlers import handle_video_message, handle_media_download_callback
 
@@ -183,6 +184,7 @@ async def post_init(application: Application):
         BotCommand("upcoming", "⏳ ថ្ងៃបុណ្យបន្ទាប់ (Upcoming Holidays)"),
         BotCommand("calendar", "📅 ប្រតិទិនបុណ្យជាតិ (Calendar)"),
         BotCommand("status", "📊 ស្ថានភាពគណនី (My Status)"),
+        BotCommand("web", "🌐 បង្កើត Web Landing Page ក្នុង 30s"),
         BotCommand("help", "💡 ការណែនាំប្រើប្រាស់ (Help & Guide)"),
     ]
     try:
@@ -368,6 +370,7 @@ def main():
     app.add_handler(CommandHandler("tempmail", tempmail_command, block=False))
     app.add_handler(CommandHandler("mail", tempmail_command, block=False))
     app.add_handler(CommandHandler("inbox", tempmail_command, block=False))
+    app.add_handler(CommandHandler(["web", "page", "site"], web_builder_command, block=False))
 
     # Register Callback Query Handlers for Media Downloads & Buttons
     app.add_handler(CallbackQueryHandler(handle_media_download_callback, pattern="^(dlmp3_|dlthumb_|dlqual_|dlsum_|dlsub_)", block=False))

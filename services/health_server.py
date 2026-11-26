@@ -1,3 +1,4 @@
+import re
 import os
 import logging
 import threading
@@ -7,12 +8,38 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 logger = logging.getLogger(__name__)
 
 HTML_PATH = Path(__file__).resolve().parent.parent / "templates" / "index.html"
+SITES_DIR = Path(__file__).resolve().parent.parent / "data" / "sites"
+SITES_DIR.mkdir(parents=True, exist_ok=True)
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         url_path = self.path.split("?")[0].rstrip("/")
+
+        # 1. Serve dynamic user landing pages: /site/<site_id> or /p/<site_id>
+        if url_path.startswith("/site/") or url_path.startswith("/p/"):
+            site_id = url_path.split("/")[-1].strip()
+            site_id = re.sub(r'[^a-zA-Z0-9_-]', '', site_id)
+            site_file = SITES_DIR / f"{site_id}.html"
+            if site_file.exists():
+                try:
+                    content = site_file.read_bytes()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(content)))
+                    self.send_header("Cache-Control", "no-cache, must-revalidate")
+                    self.end_headers()
+                    self.wfile.write(content)
+                    return
+                except Exception as e:
+                    logger.warning(f"Error serving user landing page {site_id}: {e}")
+            else:
+                self.send_response(404)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write("<h1>404 - រកមិនឃើញគេហទំព័រនេះទេ (Website Not Found)</h1>".encode("utf-8"))
+                return
         
-        # Serve Telegram Mini App HTML dashboard
+        # 2. Serve Telegram Mini App HTML dashboard
         if url_path in ["/app", "/webapp"] or (url_path == "" and "text/html" in self.headers.get("Accept", "")):
             if HTML_PATH.exists():
                 try:

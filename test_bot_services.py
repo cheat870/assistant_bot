@@ -1023,6 +1023,23 @@ async def test_calendar_service_async():
     print("  - Parsed Khmer appointment to 1-Click Google Calendar & .ics: OK")
     print("  [OK] Google Calendar & Event Parser Service verified!")
 
+async def test_web_builder_service_async():
+    print("\n[29] Testing Instant Mini Landing Page Builder Service...")
+    from services.web_builder_service import generate_landing_page
+    ok, site_id, site_url, html_str, summary = await generate_landing_page(
+        "ខ្ញុំជាអ្នកថតរូបឈ្មោះ សុខា ចង់បានគេហទំព័រដាក់រូបថត និងលេខទំនាក់ទំនង 012888999",
+        888999
+    )
+    assert ok is True, f"Web builder should succeed: {summary}"
+    assert "/site/" in site_url, f"Site URL should contain /site/: {site_url}"
+    assert "<!DOCTYPE html>" in html_str, "Should output full HTML5 document"
+    assert "cdn.tailwindcss.com" in html_str or "tailwindcss" in html_str, "Should include Tailwind CSS"
+    assert "012888999" in html_str, "Should include phone contact"
+    print(f"  - Generated site ID: {site_id}")
+    print(f"  - Preview URL: {site_url}")
+    print("  - Generated full responsive glassmorphic HTML landing page: OK")
+    print("  [OK] Instant Mini Landing Page Builder Service verified!")
+
 if __name__ == "__main__":
     test_holiday_calendar()
     test_database()
@@ -1052,4 +1069,5 @@ if __name__ == "__main__":
     asyncio.run(test_crypto_price_watcher_and_alerts_async())
     asyncio.run(test_ai_content_creator_studio_async())
     asyncio.run(test_calendar_service_async())
-    print("\n🎉 ALL 28 TEST SUITES PASSED SUCCESSFULLY! ✅")
+    asyncio.run(test_web_builder_service_async())
+    print("\n🎉 ALL 29 TEST SUITES PASSED SUCCESSFULLY! ✅")

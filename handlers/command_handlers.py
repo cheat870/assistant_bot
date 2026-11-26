@@ -287,7 +287,7 @@ def get_main_menu_keyboard(chat_id: int, page: int = 1) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton("💧 ដាក់ Watermark ទំនិញ", callback_data="btn_photo_watermark_help"),
-                InlineKeyboardButton("🛠️ ឧបករណ៍ QR / KHQR", callback_data="btn_tools_menu"),
+                InlineKeyboardButton("🌐 បង្កើត Web អាជីវកម្ម", callback_data="btn_web_builder"),
             ],
             [
                 InlineKeyboardButton("💵 តម្លៃមាស & អត្រា NBC", callback_data="btn_finance"),
@@ -406,11 +406,11 @@ def get_main_menu_keyboard(chat_id: int, page: int = 1) -> InlineKeyboardMarkup:
                     InlineKeyboardButton("✂️ កាត់ Background (/rembg)", callback_data="btn_photo_rembg_help"),
                 ],
                 [
-                    InlineKeyboardButton("🔍 ស្កេន Link បោក (/scan)", callback_data="btn_scam_help"),
+                    InlineKeyboardButton("🌐 បង្កើត Web (30s)", callback_data="btn_web_builder"),
                     InlineKeyboardButton("📧 អ៊ីមែល 10-Min (/mail)", callback_data="btn_tempmail"),
                 ],
                 [
-                    InlineKeyboardButton("🚗 ធ្វើដំណើរ & ឡាន (/trip)", callback_data="btn_trip_menu"),
+                    InlineKeyboardButton("🔍 ស្កេន Link បោក (/scan)", callback_data="btn_scam_help"),
                     InlineKeyboardButton("💻 Code Runner (/code)", callback_data="btn_code_menu"),
                 ],
                 [
@@ -4726,6 +4726,77 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]])
             await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
 
+        elif data == "btn_web_builder":
+            await query.answer()
+            tip = (
+                "🌐 *[Instant Mini Landing Page Builder - បង្កើត Web ផ្ទាល់ខ្លួន 30s]* ✨\n\n"
+                "គ្រាន់តែប្រាប់ Bot ពីអាជីវកម្ម ឬជំនាញរបស់អ្នក ➔ AI នឹងរចនាគេហទំព័រ Landing Page ដ៏ទំនើបមួយភ្លាមៗ "
+                "ដែលបើកមើលបានលើ Telegram Mini App ព្រមទាំងទាញយក File កូដ HTML ទៅ Host លើ Domain ផ្ទាល់ខ្លួនបាន!\n\n"
+                "👉 *របៀបប្រើប្រាស់៖*\n"
+                "វាយ៖ `/web <ព័ត៌មានដែលចង់បាន>` ឬ `/page <ព័ត៌មាន>`\n\n"
+                "• ឧទាហរណ៍៖ `/web ខ្ញុំជាអ្នកថតរូបឈ្មោះ សុខា ចង់បានគេហទំព័រដាក់រូបថត សេវាកម្ម និងលេខទូរស័ព្ទ 012888999 @sokha_photo`\n"
+                "• ឧទាហរណ៍៖ `/web ហាងកាហ្វេ Cafe Amazon សាខាទួលគោក មានម៉ឺនុយភេសជ្ជៈ ប្រូម៉ូសិន និងផែនទី`\n"
+                "• ឧទាហរណ៍៖ `/web អ្នកលក់ឡេ Online សេវាដឹក ២៥ ខេត្តក្រុង មានប៊ូតុងឆាត Telegram និង Facebook`\n"
+                "• ឧទាហរណ៍៖ `/web Portfolio អ្នកសរសេរកូដ Full-Stack Developer ជំនាញ Python & React`\n\n"
+                "👇 *ឬចុចជ្រើសរើសគំរូរហ័ស (Quick Presets) ខាងក្រោមដើម្បីសាកល្បង៖*"
+            )
+            kb = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("📸 គំរូអ្នកថតរូប", callback_data="web_preset_photo"),
+                    InlineKeyboardButton("☕ គំរូហាងកាហ្វេ", callback_data="web_preset_cafe"),
+                ],
+                [
+                    InlineKeyboardButton("💄 គំរូលក់ទំនិញ", callback_data="web_preset_shop"),
+                    InlineKeyboardButton("💻 គំរូ Portfolio IT", callback_data="web_preset_dev"),
+                ],
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            await query.edit_message_text(text=tip, reply_markup=kb, parse_mode="Markdown")
+
+        elif data.startswith("web_preset_"):
+            preset_type = data.replace("web_preset_", "")
+            preset_prompts = {
+                "photo": "ខ្ញុំជាអ្នកថតរូប និងវីដេអូអាជីព (Sokha Media Studio) សេវាកម្មថតរូបមង្គលការ Event និង Studio ទំនាក់ទំនង 012 888 999 @sokha_media",
+                "cafe": "ហាងកាហ្វេ Cafe Arom & Bakery បរិយាកាសស្ងប់ស្ងាត់ មានភេសជ្ជៈឆ្ងាញ់ៗ កាហ្វេទឹកដោះគោ និងនំខេក ទំនាក់ទំនង 016 777 888 @cafearom",
+                "shop": "ហាងលក់គ្រឿងសម្អាង និងម៉ូដសម្លៀកបំពាក់នារីទាន់សម័យ (Beauty & Fashion Shop) សេវាដឹក ២៥ ខេត្តក្រុង ទំនាក់ទំនង 098 555 666 @beautyshop",
+                "dev": "Professional Full-Stack Developer & AI Specialist (Python, React, Cloud) ទទួលធ្វើ Website, Mobile App & Telegram Bot ទំនាក់ទំនង 092 333 444 @dev_expert"
+            }
+            preset_prompt = preset_prompts.get(preset_type, "សេវាកម្មអាជីវកម្ម និងពាណិជ្ជកម្មកម្ពុជា")
+            await query.answer("កំពុងរចនាគេហទំព័រ...")
+            await query.edit_message_text("🌐 *AI កំពុងរចនា និងបង្កើតគេហទំព័រ Landing Page ដ៏ទំនើបរបស់អ្នក...* ⏳\nសូមរង់ចាំប្រហែល ៥ វិនាទី! 🚀", parse_mode="Markdown")
+
+            from services.web_builder_service import generate_landing_page
+            import io
+            ok, site_id, site_url, html_str, summary = await generate_landing_page(preset_prompt, chat_id)
+            if ok:
+                buttons = [
+                    [InlineKeyboardButton("🌐 បើកមើល Website លើទូរស័ព្ទ (Mini App)", web_app=WebAppInfo(url=site_url))],
+                    [InlineKeyboardButton("🔗 បើកមើលលើ Browser / Safari", url=site_url)],
+                    [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+                ]
+                card_text = (
+                    "🎉 *[បានបង្កើតគេហទំព័រ Landing Page ជោគជ័យ!]* 🌐✨\n\n"
+                    f"{summary}\n\n"
+                    "💡 *លក្ខណៈពិសេស៖*\n"
+                    "• រចនាបថ Glassmorphism Dark Mode ទំនើបកម្រិតអន្តរជាតិ\n"
+                    "• បង្ហាញរូបភាពច្បាស់ HD និងសេវាកម្មច្បាស់ៗ\n"
+                    "• ប៊ូតុង Call ភ្លាមៗ និង Chat Telegram ផ្ទាល់\n"
+                    "• ដំណើរការរលូនលើទូរស័ព្ទដៃ iPhone និង Android\n\n"
+                    "👇 _ចុចប៊ូតុងខាងក្រោមដើម្បីបើកមើលភ្លាមៗ ឬទាញយកឯកសារកូដ HTML ខាងក្រោម៖_"
+                )
+                await query.edit_message_text(text=card_text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
+
+                html_file = io.BytesIO(html_str.encode("utf-8"))
+                html_file.name = f"{site_id}.html"
+                await query.message.reply_document(
+                    document=html_file,
+                    filename=f"{site_id}.html",
+                    caption=f"📎 *ឯកសារកូដ Website ពេញលេញ (.html)*\n_លោកអ្នកអាចទាញយក File នេះយកទៅ Host លើ Domain ផ្ទាល់ខ្លួន (Netlify, Vercel, GitHub) បានយ៉ាងងាយស្រួល!_",
+                    parse_mode="Markdown"
+                )
+            else:
+                await query.edit_message_text(f"❌ {summary}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]]))
+
         elif data == "btn_scam_help":
             await query.answer()
             tip = (
@@ -5553,5 +5624,80 @@ async def tempmail_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error in tempmail_command: {e}")
         await safe_reply_text(update.message, f"❌ កំហុសបច្ចេកទេសក្នុងសេវាអ៊ីមែល៖ {str(e)[:120]}")
+
+async def web_builder_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate instant modern responsive landing page website in 30 seconds: /web, /page, /site."""
+    chat = update.effective_chat
+    user_text = " ".join(context.args) if context.args else ""
+    if not user_text and update.message and update.message.reply_to_message:
+        user_text = update.message.reply_to_message.text or update.message.reply_to_message.caption or ""
+
+    if not user_text:
+        tip = (
+            "🌐 *[Instant Mini Landing Page Builder - បង្កើត Web ផ្ទាល់ខ្លួន 30s]* ✨\n\n"
+            "គ្រាន់តែប្រាប់ Bot ពីអាជីវកម្ម ឬជំនាញរបស់អ្នក ➔ AI នឹងរចនាគេហទំព័រ Landing Page ដ៏ទំនើបមួយភ្លាមៗ "
+            "ដែលបើកមើលបានលើ Telegram Mini App ព្រមទាំងទាញយក File កូដ HTML ទៅ Host លើ Domain ផ្ទាល់ខ្លួនបាន!\n\n"
+            "👉 *របៀបប្រើប្រាស់៖*\n"
+            "វាយ៖ `/web <ព័ត៌មានដែលចង់បាន>` ឬ `/page <ព័ត៌មាន>`\n\n"
+            "• ឧទាហរណ៍៖ `/web ខ្ញុំជាអ្នកថតរូបឈ្មោះ សុខា ចង់បានគេហទំព័រដាក់រូបថត សេវាកម្ម និងលេខទូរស័ព្ទ 012888999 @sokha_photo`\n"
+            "• ឧទាហរណ៍៖ `/web ហាងកាហ្វេ Cafe Amazon សាខាទួលគោក មានម៉ឺនុយភេសជ្ជៈ ប្រូម៉ូសិន និងផែនទី`\n"
+            "• ឧទាហរណ៍៖ `/web អ្នកលក់ឡេ Online សេវាដឹក ២៥ ខេត្តក្រុង មានប៊ូតុងឆាត Telegram និង Facebook`\n"
+            "• ឧទាហរណ៍៖ `/web Portfolio អ្នកសរសេរកូដ Full-Stack Developer ជំនាញ Python & React`\n\n"
+            "👇 _ឬចុចជ្រើសរើសគំរូរហ័ស (Quick Presets) ខាងក្រោមដើម្បីសាកល្បង៖_"
+        )
+        kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("📸 គំរូអ្នកថតរូប", callback_data="web_preset_photo"),
+                InlineKeyboardButton("☕ គំរូហាងកាហ្វេ", callback_data="web_preset_cafe"),
+            ],
+            [
+                InlineKeyboardButton("💄 គំរូលក់ទំនិញ", callback_data="web_preset_shop"),
+                InlineKeyboardButton("💻 គំរូ Portfolio IT", callback_data="web_preset_dev"),
+            ],
+            [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+        ])
+        await safe_reply_text(update.message, tip, reply_markup=kb)
+        return
+
+    status_msg = await update.message.reply_text("🌐 *AI កំពុងរចនា និងបង្កើតគេហទំព័រ Landing Page ដ៏ទំនើបរបស់អ្នក...* ⏳\nសូមរង់ចាំប្រហែល ១០ វិនាទី! 🚀", parse_mode="Markdown")
+    await update.message.chat.send_action("upload_document")
+
+    try:
+        from services.web_builder_service import generate_landing_page
+        import io
+        ok, site_id, site_url, html_str, summary = await generate_landing_page(user_text, chat.id)
+        if not ok:
+            await safe_edit_text(status_msg, f"❌ {summary}")
+            return
+
+        buttons = [
+            [InlineKeyboardButton("🌐 បើកមើល Website លើទូរស័ព្ទ (Mini App)", web_app=WebAppInfo(url=site_url))],
+            [InlineKeyboardButton("🔗 បើកមើលលើ Browser / Safari", url=site_url)],
+            [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+        ]
+
+        card_text = (
+            "🎉 *[បានបង្កើតគេហទំព័រ Landing Page ជោគជ័យ!]* 🌐✨\n\n"
+            f"{summary}\n\n"
+            "💡 *លក្ខណៈពិសេស៖*\n"
+            "• រចនាបថ Glassmorphism Dark Mode ទំនើបកម្រិតអន្តរជាតិ\n"
+            "• បង្ហាញរូបភាពច្បាស់ HD និងសេវាកម្មច្បាស់ៗ\n"
+            "• ប៊ូតុង Call ភ្លាមៗ និង Chat Telegram ផ្ទាល់\n"
+            "• ដំណើរការរលូនលើទូរស័ព្ទដៃ iPhone និង Android\n\n"
+            "👇 _ចុចប៊ូតុងខាងក្រោមដើម្បីបើកមើលភ្លាមៗ ឬទាញយកឯកសារកូដ HTML ខាងក្រោម៖_"
+        )
+        await safe_edit_text(status_msg, card_text, reply_markup=InlineKeyboardMarkup(buttons))
+
+        html_file = io.BytesIO(html_str.encode("utf-8"))
+        html_file.name = f"{site_id}.html"
+        await update.message.reply_document(
+            document=html_file,
+            filename=f"{site_id}.html",
+            caption=f"📎 *ឯកសារកូដ Website ពេញលេញ (.html)*\n_លោកអ្នកអាចទាញយក File នេះយកទៅ Host លើ Domain ផ្ទាល់ខ្លួន (Netlify, Vercel, GitHub) បានយ៉ាងងាយស្រួល!_",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"Error in web_builder_command: {e}")
+        await safe_edit_text(status_msg, f"❌ កំហុសបច្ចេកទេសក្នុងការបង្កើត Website៖ {str(e)[:120]}")
 
 
