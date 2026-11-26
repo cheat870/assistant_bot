@@ -7,12 +7,77 @@ import urllib.parse
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, Tuple
 
-from config import BOT_TIMEZONE, GEMINI_API_KEY
+from config import BOT_TIMEZONE, GEMINI_API_KEY, TIMEZONE_STR
 from database import add_reminder
 
 logger = logging.getLogger(__name__)
 
-CAMBODIA_TZ = pytz.timezone(BOT_TIMEZONE)
+CAMBODIA_TZ = BOT_TIMEZONE if hasattr(BOT_TIMEZONE, "localize") else pytz.timezone(TIMEZONE_STR)
+
+def parse_khmer_event_fallback(text: str, base_now: datetime) -> Tuple[datetime, str, str]:
+    """Fallback rule-based parser for common Khmer & English appointment strings."""
+    kh_digits = {'០':'0', '១':'1', '២':'2', '៣':'3', '៤':'4', '៥':'5', '៦':'6', '៧':'7', '៨':'8', '៩':'9'}
+    t = text
+    for k, v in kh_digits.items():
+        t = t.replace(k, v)
+
+    # Date
+    target_date = base_now.date()
+    if 'ស្អែក' in t or 'tomorrow' in t.lower():
+        target_date += timedelta(days=1)
+    elif 'ខានស្អែក' in t:
+        target_date += timedelta(days=2)
+
+    # Time extraction: e.g. 'ម៉ោង 2 រសៀល', 'ម៉ោង 14:00', 'ម៉ោង 9 ព្រឹក'
+    hour = 14 if 'រសៀល' in t or 'ល្ងាច' in t else 9
+    minute = 0
+    m = re.search(r'ម៉ោង\s*(\d{1,2})(?::(\d{2}))?\s*(ព្រឹក|រសៀល|ល្ងាច|យប់)?', t)
+    if m:
+        h = int(m.group(1))
+        mi = int(m.group(2)) if m.group(2) else 0
+        ampm = m.group(3) or ''
+        if ampm in ['រសៀល', 'ល្ងាច', 'យប់'] and h < 12:
+            h += 12
+        elif ampm == 'ព្រឹក' and h == 12:
+            h = 0
+        hour = h
+        minute = mi
+    else:
+        # Check standard 14:00 or 2pm
+        m2 = re.search(r'(\d{1,2})(?::(\d{2}))?\s*(am|pm|AM|PM)', t)
+        if m2:
+            h = int(m2.group(1))
+            mi = int(m2.group(2)) if m2.group(2) else 0
+            ampm = m2.group(3).lower()
+            if ampm == 'pm' and h < 12:
+                h += 12
+            elif ampm == 'am' and h == 12:
+                h = 0
+            hour = h
+            minute = mi
+
+    dt_start_naive = datetime.combine(target_date, datetime.min.time()).replace(hour=hour, minute=minute)
+    dt_start = CAMBODIA_TZ.localize(dt_start_naive)
+
+    # Title & Location extraction
+    clean = re.sub(r'/(event|schedule)', '', t, flags=re.IGNORECASE)
+    clean = re.sub(r'(ស្អែក|ថ្ងៃនេះ|ខានស្អែក|tomorrow|today)', '', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'ម៉ោង\s*\d{1,2}(?::\d{2})?\s*(ព្រឹក|រសៀល|ល្ងាច|យប់)?', '', clean)
+    clean = re.sub(r'\d{1,2}(?::\d{2})?\s*(am|pm|AM|PM)', '', clean).strip()
+
+    loc = ''
+    title = clean
+    if 'នៅ' in clean:
+        parts = clean.split('នៅ', 1)
+        title = parts[0].strip() or 'កម្មវិធីណាត់ជួប'
+        loc = parts[1].strip()
+    elif 'at' in clean.lower():
+        parts = re.split(r'\bat\b', clean, flags=re.IGNORECASE, maxsplit=1)
+        title = parts[0].strip() or 'កម្មវិធីណាត់ជួប'
+        loc = parts[1].strip()
+
+    title = title or "កម្មវិធីណាត់ជួប"
+    return dt_start, title, loc
 
 async def parse_and_create_calendar_event(user_text: str, chat_id: int) -> Tuple[bool, str, Optional[str], Optional[str]]:
     """
@@ -39,42 +104,51 @@ async def parse_and_create_calendar_event(user_text: str, chat_id: int) -> Tuple
     )
 
     try:
-        from google import genai
-        from google.genai import types
-        from services.ai_service import _call_gemini_api
+        data = None
+        try:
+            from google import genai
+            from google.genai import types
+            from services.ai_service import _call_gemini_api
 
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        response = await asyncio.to_thread(
-            _call_gemini_api,
-            client,
-            prompt,
-            "Extract calendar event strictly as JSON."
-        )
+            if GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here":
+                client = genai.Client(api_key=GEMINI_API_KEY)
+                response = await asyncio.to_thread(
+                    _call_gemini_api,
+                    client,
+                    prompt,
+                    "Extract calendar event strictly as JSON."
+                )
 
-        res_text = response.text.strip() if response and response.text else ""
-        if res_text.startswith("```"):
-            res_text = re.sub(r"^```[a-zA-Z]*\n?", "", res_text)
-            res_text = re.sub(r"\n?```$", "", res_text).strip()
+                res_text = response.text.strip() if response and response.text else ""
+                if res_text.startswith("```"):
+                    res_text = re.sub(r"^```[a-zA-Z]*\n?", "", res_text)
+                    res_text = re.sub(r"\n?```$", "", res_text).strip()
 
-        data = json.loads(res_text)
-        title = data.get("title", "កម្មវិធីណាត់ជួប").strip()
-        location = data.get("location", "").strip()
-        start_str = data.get("start_time", "").strip()
-        end_str = data.get("end_time", "").strip()
-        description = data.get("description", title).strip()
+                if res_text:
+                    data = json.loads(res_text)
+        except Exception as e_ai:
+            logger.warning(f"Gemini calendar parsing failed, using rule-based fallback: {e_ai}")
 
-        if not start_str:
-            return False, "❌ មិនអាចកំណត់កាលបរិច្ឆេទ ឬម៉ោងច្បាស់លាស់បានទេ។ សូមសាកល្បងម្តងទៀត (ឧ. `ស្អែកម៉ោង ២ រសៀល ណាត់ជួប...`)។", None, None
+        if data and isinstance(data, dict) and data.get("start_time"):
+            title = data.get("title", "កម្មវិធីណាត់ជួប").strip()
+            location = data.get("location", "").strip()
+            start_str = data.get("start_time", "").strip()
+            end_str = data.get("end_time", "").strip()
+            description = data.get("description", title).strip()
 
-        # Parse local start & end datetimes
-        dt_start_naive = datetime.fromisoformat(start_str)
-        dt_start = CAMBODIA_TZ.localize(dt_start_naive) if dt_start_naive.tzinfo is None else dt_start_naive
+            dt_start_naive = datetime.fromisoformat(start_str)
+            dt_start = CAMBODIA_TZ.localize(dt_start_naive) if dt_start_naive.tzinfo is None else dt_start_naive
 
-        if end_str:
-            dt_end_naive = datetime.fromisoformat(end_str)
-            dt_end = CAMBODIA_TZ.localize(dt_end_naive) if dt_end_naive.tzinfo is None else dt_end_naive
+            if end_str:
+                dt_end_naive = datetime.fromisoformat(end_str)
+                dt_end = CAMBODIA_TZ.localize(dt_end_naive) if dt_end_naive.tzinfo is None else dt_end_naive
+            else:
+                dt_end = dt_start + timedelta(hours=1)
         else:
+            # Fallback to rule-based Khmer event parser
+            dt_start, title, location = parse_khmer_event_fallback(user_text, now_local)
             dt_end = dt_start + timedelta(hours=1)
+            description = f"{title}" + (f" នៅ {location}" if location else "")
 
         # Convert to UTC for Google Calendar & iCal
         dt_start_utc = dt_start.astimezone(pytz.utc)

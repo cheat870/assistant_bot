@@ -1012,6 +1012,17 @@ async def test_ai_content_creator_studio_async():
     print("  - Content generation pipeline verified: OK")
     print("  [OK] AI Content Creator Studio verified!")
 
+async def test_calendar_service_async():
+    print("\n[28] Testing Google Calendar & Event Parser Service...")
+    from services.calendar_service import parse_and_create_calendar_event
+    ok, msg, url, ics = await parse_and_create_calendar_event("ស្អែកម៉ោង ២ រសៀល ណាត់ជួបអតិថិជននៅ Brown Bokor", 777999)
+    assert ok is True, f"Calendar parsing should succeed: {msg}"
+    assert url is not None and "calendar.google.com" in url
+    assert ics is not None and "BEGIN:VCALENDAR" in ics
+    assert "Brown Bokor" in msg
+    print("  - Parsed Khmer appointment to 1-Click Google Calendar & .ics: OK")
+    print("  [OK] Google Calendar & Event Parser Service verified!")
+
 if __name__ == "__main__":
     test_holiday_calendar()
     test_database()
@@ -1040,4 +1051,5 @@ if __name__ == "__main__":
     asyncio.run(test_telegram_user_resolver_async())
     asyncio.run(test_crypto_price_watcher_and_alerts_async())
     asyncio.run(test_ai_content_creator_studio_async())
-    print("\n🎉 ALL 27 TEST SUITES PASSED SUCCESSFULLY! ✅")
+    asyncio.run(test_calendar_service_async())
+    print("\n🎉 ALL 28 TEST SUITES PASSED SUCCESSFULLY! ✅")
