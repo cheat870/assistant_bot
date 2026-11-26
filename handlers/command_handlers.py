@@ -79,7 +79,12 @@ from services.tts_service import generate_tts_audio
 from services.linguistics_service import check_khmer_spelling, translate_pro
 from services.music_service import download_song, identify_tiktok_sound
 from services.image_service import remove_background
-from services.news_service import generate_morning_news_digest
+from services.news_service import (
+    generate_morning_news_digest,
+    generate_category_news_card,
+    generate_search_news_card,
+    NEWS_CATEGORIES,
+)
 from services.pdf_service import analyze_and_summarize_pdf, answer_pdf_question
 from services.image_enhancer_service import enhance_image
 from services.watermark_service import apply_watermark
@@ -481,6 +486,34 @@ def get_back_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔙 ត្រឡប់ទៅ Menu ដើម", callback_data="btn_back_main")]
     ])
+
+def get_news_hub_keyboard(active_cat: str = "national") -> InlineKeyboardMarkup:
+    """Interactive category switcher for Multi-Category News Hub."""
+    def label(cat_key: str, default_name: str) -> str:
+        return f"● {default_name}" if active_cat == cat_key else default_name
+
+    buttons = [
+        [
+            InlineKeyboardButton(label("national", "🇰🇭 ព័ត៌មានជាតិ"), callback_data="newscat_national"),
+            InlineKeyboardButton(label("business", "💼 សេដ្ឋកិច្ច"), callback_data="newscat_business"),
+        ],
+        [
+            InlineKeyboardButton(label("tech", "🤖 Tech & AI"), callback_data="newscat_tech"),
+            InlineKeyboardButton(label("sports", "⚽ កីឡា"), callback_data="newscat_sports"),
+        ],
+        [
+            InlineKeyboardButton(label("crypto", "🪙 Crypto/TON"), callback_data="newscat_crypto"),
+            InlineKeyboardButton(label("world", "🌍 ពិភពលោក"), callback_data="newscat_world"),
+        ],
+        [
+            InlineKeyboardButton(label("local", "📰 សារព័ត៌មានកម្ពុជា (Fresh News/ThmeyThmey)"), callback_data="newscat_local"),
+        ],
+        [
+            InlineKeyboardButton("🔄 Refresh ព័ត៌មាន", callback_data=f"newscat_refresh_{active_cat}"),
+            InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main"),
+        ]
+    ]
+    return InlineKeyboardMarkup(buttons)
 
 def get_briefing_keyboard() -> InlineKeyboardMarkup:
     """Action keyboard for VIP Morning Executive Briefing."""
@@ -2065,15 +2098,38 @@ async def sound_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Morning News Digest Handler
 # -------------------------------------------------------------
 async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """View Morning News Digest with 'បង្ហាញសារថ្មី លុបសារចាស់': /news."""
+    """View Multi-Category News Hub or Search News: /news or /news <topic>."""
     await update.message.chat.send_action("typing")
-    status_msg = await send_clean_response(update, context, "📰 *កំពុងទាញយកព័ត៌មានជាតិ & បច្ចេកវិទ្យា...*")
+    query = " ".join(context.args).strip() if context.args else ""
+    if query:
+        status_msg = await send_clean_response(update, context, f"🔍 *កំពុងស្វែងរកព័ត៌មាន «{query}»...*")
+        try:
+            res = await generate_search_news_card(query)
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📰 ទៅកាន់ News Hub ពេញលេញ", callback_data="btn_news")],
+                [InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")]
+            ])
+            if status_msg:
+                await safe_edit_text(status_msg, res, reply_markup=kb)
+            else:
+                await send_clean_response(update, context, res, reply_markup=kb)
+        except Exception as e:
+            logger.error(f"News search error: {e}")
+            err_msg = f"❌ មិនអាចស្វែងរកព័ត៌មានបានទេ៖ {str(e)[:120]}"
+            if status_msg:
+                await safe_edit_text(status_msg, err_msg, reply_markup=get_back_keyboard())
+            else:
+                await send_clean_response(update, context, err_msg, reply_markup=get_back_keyboard())
+        return
+
+    status_msg = await send_clean_response(update, context, "📰 *កំពុងទាញយកព័ត៌មានជាតិ & សង្គម...*")
     try:
-        digest = await generate_morning_news_digest()
+        card, _ = await generate_category_news_card("national")
+        kb = get_news_hub_keyboard("national")
         if status_msg:
-            await safe_edit_text(status_msg, digest, reply_markup=get_back_keyboard())
+            await safe_edit_text(status_msg, card, reply_markup=kb)
         else:
-            await send_clean_response(update, context, digest, reply_markup=get_back_keyboard())
+            await send_clean_response(update, context, card, reply_markup=kb)
     except Exception as e:
         logger.error(f"News error: {e}")
         err_msg = f"❌ មិនអាចទាញយកព័ត៌មានបានទេ៖ {str(e)[:120]}"
@@ -3490,19 +3546,29 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 parse_mode="Markdown"
             )
 
-        elif data == "btn_news":
-            await query.answer("កំពុងទាញយកព័ត៌មានជាតិ & បច្ចេកវិទ្យា...")
-            news_rep = await generate_morning_news_digest()
-            await query.edit_message_text(
-                news_rep,
-                reply_markup=InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton("🔄 ធ្វើបច្ចុប្បន្នភាព", callback_data="btn_news"),
-                        InlineKeyboardButton("🔙 Menu ដើម", callback_data="btn_back_main")
-                    ]
-                ]),
-                parse_mode="Markdown"
-            )
+        elif data == "btn_news" or data.startswith("newscat_"):
+            force_refresh = False
+            active_cat = "national"
+            if data == "btn_news":
+                active_cat = "national"
+                await query.answer("កំពុងបើកផ្ទាំងព័ត៌មាន Multi-Category News Hub...")
+            elif data.startswith("newscat_refresh_"):
+                active_cat = data.replace("newscat_refresh_", "")
+                force_refresh = True
+                await query.answer("កំពុងធ្វើបច្ចុប្បន្នភាពព័ត៌មាន...")
+            elif data.startswith("newscat_"):
+                active_cat = data.replace("newscat_", "")
+                await query.answer()
+
+            card, _ = await generate_category_news_card(active_cat, force_refresh=force_refresh)
+            kb = get_news_hub_keyboard(active_cat)
+            try:
+                await query.edit_message_text(card, reply_markup=kb, parse_mode="Markdown")
+            except Exception as e_edit:
+                if "Message is not modified" in str(e_edit):
+                    await query.answer("ព័ត៌មាននេះថ្មីបំផុតរួចរាល់ហើយ! (Up to date)", show_alert=False)
+                else:
+                    logger.warning(f"Error editing news category message: {e_edit}")
 
         elif data == "btn_music_help":
             await query.answer()
