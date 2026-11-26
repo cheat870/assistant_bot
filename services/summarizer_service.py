@@ -31,7 +31,8 @@ def extract_video_transcript(url: str) -> Dict[str, Any]:
         'socket_timeout': 25,
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'ios', 'web']
+                'player_client': ['android', 'ios', 'tv_embedded'],
+                'player_skip': ['webpage', 'configs']
             }
         }
     }

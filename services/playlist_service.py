@@ -20,6 +20,12 @@ def extract_playlist_info(playlist_url: str, max_items: int = 15) -> Dict[str, A
         'no_warnings': True,
         'playlist_items': f"1-{max_items}",
         'source_address': '0.0.0.0',
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios', 'tv_embedded'],
+                'player_skip': ['webpage', 'configs']
+            }
+        }
     }
 
     try:

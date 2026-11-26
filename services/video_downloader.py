@@ -173,8 +173,30 @@ def _download_tiktok_api(url: str, download_folder: Path, audio_only: bool = Fal
     except Exception as e:
         return VideoDownloadResult(success=False, error_message=f"កំហុសក្នុងការទាញយក TikTok៖ {str(e)[:120]}")
 
+def _get_youtube_cookiefile() -> Optional[str]:
+    """Retrieve YouTube cookies from file or environment variable to bypass heavy cloud IP blocks."""
+    root_dir = Path(__file__).resolve().parent.parent
+    c_path = root_dir / "cookies.txt"
+    if c_path.exists():
+        return str(c_path)
+    if os.getenv("YOUTUBE_COOKIES"):
+        tmp = DOWNLOAD_DIR / "cookies.txt"
+        try:
+            tmp.write_text(os.getenv("YOUTUBE_COOKIES", ""), encoding="utf-8")
+            return str(tmp)
+        except Exception:
+            pass
+    return None
+
+YOUTUBE_EXTRACTOR_ARGS = {
+    'youtube': {
+        'player_client': ['android', 'ios', 'tv_embedded'],
+        'player_skip': ['webpage', 'configs']
+    }
+}
+
 def _sync_download(url: str, download_folder: Path, quality: str = "best", audio_only: bool = False) -> VideoDownloadResult:
-    """Internal synchronous worker for downloading video or audio."""
+    """Internal synchronous worker for downloading video or audio with multi-client bypass."""
     # If TikTok, use dedicated fast watermark-free downloader first
     if is_tiktok_url(url):
         tiktok_res = _download_tiktok_api(url, download_folder, audio_only=audio_only)
@@ -200,80 +222,102 @@ def _sync_download(url: str, download_folder: Path, quality: str = "best", audio
     else:
         fmt = 'bestvideo[height<=2160][filesize_approx<?48M]+bestaudio/bestvideo[height<=1080][filesize_approx<?48M]+bestaudio/best[height<=1080]/best'
 
-    ydl_opts: Dict[str, Any] = {
-        'format': fmt,
-        'outtmpl': output_template,
-        'noplaylist': True,
-        'quiet': True,
-        'no_warnings': True,
-        'source_address': '0.0.0.0',
-        'socket_timeout': 30,
-        'max_filesize': MAX_FILE_SIZE_MB * 1024 * 1024,
-        'js_runtimes': {'node': {}},
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'ios', 'web', 'mweb']
-            }
-        },
-    }
-    
-    if not audio_only:
-        ydl_opts['merge_output_format'] = 'mp4'
+    cookiefile = _get_youtube_cookiefile()
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            if not info:
-                return VideoDownloadResult(success=False, error_message="មិនអាចទាញយកព័ត៌មានវីដេអូបានទេ។")
-            
-            expected_filename = ydl.prepare_filename(info)
-            actual_file = None
-            
-            base_prefix = f"media_{unique_id}_"
-            for f in download_folder.glob(f"{base_prefix}*"):
-                if f.is_file():
-                    actual_file = f
-                    break
+    # Multi-client strategy list to bypass YouTube datacenter blocks on Render/AWS/GCP
+    client_strategies = [
+        ['android', 'ios', 'tv_embedded'],
+        ['tv_embedded', 'android'],
+        ['android'],
+    ]
+
+    last_error: Optional[Exception] = None
+
+    for client_list in client_strategies:
+        ydl_opts: Dict[str, Any] = {
+            'format': fmt,
+            'outtmpl': output_template,
+            'noplaylist': True,
+            'quiet': True,
+            'no_warnings': True,
+            'source_address': '0.0.0.0',
+            'socket_timeout': 30,
+            'max_filesize': MAX_FILE_SIZE_MB * 1024 * 1024,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': client_list,
+                    'player_skip': ['webpage', 'configs']
+                }
+            },
+        }
+        
+        if cookiefile:
+            ydl_opts['cookiefile'] = cookiefile
+
+        if not audio_only:
+            ydl_opts['merge_output_format'] = 'mp4'
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                if not info:
+                    continue
+                
+                expected_filename = ydl.prepare_filename(info)
+                actual_file = None
+                
+                base_prefix = f"media_{unique_id}_"
+                for f in download_folder.glob(f"{base_prefix}*"):
+                    if f.is_file():
+                        actual_file = f
+                        break
+                        
+                if not actual_file or not actual_file.exists():
+                    if os.path.exists(expected_filename):
+                        actual_file = Path(expected_filename)
+                
+                if not actual_file or not actual_file.exists():
+                    continue
                     
-            if not actual_file or not actual_file.exists():
-                if os.path.exists(expected_filename):
-                    actual_file = Path(expected_filename)
-            
-            if not actual_file or not actual_file.exists():
-                return VideoDownloadResult(success=False, error_message="ឯកសារត្រូវបានទាញយកតែរកមិនឃើញ។")
+                file_bytes = actual_file.stat().st_size
+                file_size_mb = round(file_bytes / (1024 * 1024), 2)
                 
-            file_bytes = actual_file.stat().st_size
-            file_size_mb = round(file_bytes / (1024 * 1024), 2)
-            
-            if file_size_mb > MAX_FILE_SIZE_MB:
-                try:
-                    actual_file.unlink()
-                except Exception:
-                    pass
+                if file_size_mb > MAX_FILE_SIZE_MB:
+                    try:
+                        actual_file.unlink()
+                    except Exception:
+                        pass
+                    return VideoDownloadResult(
+                        success=False,
+                        file_size_mb=file_size_mb,
+                        error_message=f"ទំហំឯកសារ ({file_size_mb} MB) ធំជាងកម្រិត Telegram Bot អនុញ្ញាត ({MAX_FILE_SIZE_MB} MB)។"
+                    )
+                    
+                title = info.get('title') or ("Audio" if audio_only else "Video")
+                duration = info.get('duration')
+                thumbnail = info.get('thumbnail')
+                uploader = info.get('uploader') or info.get('channel') or "Unknown"
+                
                 return VideoDownloadResult(
-                    success=False,
+                    success=True,
+                    file_path=str(actual_file),
+                    title=title,
+                    duration=duration,
+                    thumbnail_url=thumbnail,
+                    uploader=uploader,
                     file_size_mb=file_size_mb,
-                    error_message=f"ទំហំឯកសារ ({file_size_mb} MB) ធំជាងកម្រិត Telegram Bot អនុញ្ញាត ({MAX_FILE_SIZE_MB} MB)។"
+                    is_audio=audio_only
                 )
-                
-            title = info.get('title') or ("Audio" if audio_only else "Video")
-            duration = info.get('duration')
-            thumbnail = info.get('thumbnail')
-            uploader = info.get('uploader') or info.get('channel') or "Unknown"
-            
-            return VideoDownloadResult(
-                success=True,
-                file_path=str(actual_file),
-                title=title,
-                duration=duration,
-                thumbnail_url=thumbnail,
-                uploader=uploader,
-                file_size_mb=file_size_mb,
-                is_audio=audio_only
-            )
-            
-    except yt_dlp.utils.DownloadError as e:
-        err_str = str(e)
+        except Exception as e:
+            last_error = e
+            # Try format fallback to 'best' if requested format wasn't available
+            if "format is not available" in str(e).lower() and fmt != 'best':
+                fmt = 'best'
+            continue
+
+    # If all client strategies were exhausted
+    if last_error:
+        err_str = str(last_error)
         if is_tiktok_url(url):
             fallback_res = _download_tiktok_api(url, download_folder, audio_only=audio_only)
             if fallback_res.success:
@@ -284,10 +328,10 @@ def _sync_download(url: str, download_folder: Path, quality: str = "best", audio
             msg = f"ឯកសារនេះមានទំហំធំជាង {MAX_FILE_SIZE_MB} MB ដែលលើសពីកម្រិត Telegram Bot អាចផ្ញើបាន។"
         elif "private video" in err_lower or "login" in err_lower or "sign in" in err_lower:
             msg = "វីដេអូនេះជា Private ឬទាមទារការ Login ចូលគណនី YouTube។"
-        elif "unavailable" in err_lower or "does not exist" in err_lower or "removed" in err_lower:
+        elif "does not exist" in err_lower or "removed" in err_lower or "video unavailable" in err_lower:
             msg = "វីដេអូនេះមិនមាននៅលើ YouTube ទៀតទេ (ប្រហែលត្រូវបានម្ចាស់លុប Private ឬបិទការចាក់)។"
         elif "failed to extract any player response" in err_lower:
-            msg = "វីដេអូនេះមិនមាននៅលើ YouTube ទៀតទេ ឬត្រូវបានលុបចេញពី Channel (Unavailable / Deleted)។"
+            msg = "ប្រព័ន្ធ YouTube បានរារាំងការតភ្ជាប់ជាបណ្ដោះអាសន្ន (YouTube Bot Block)។ សូមសាកល្បងម្ដងទៀតបន្តិចទៀត។"
         elif "copyright" in err_lower:
             msg = "វីដេអូនេះត្រូវបានបិទដោយសារបញ្ហារក្សាសិទ្ធិ (Copyright Strike)។"
         else:
@@ -296,8 +340,8 @@ def _sync_download(url: str, download_folder: Path, quality: str = "best", audio
             clean_err = clean_err.replace("ERROR:", "").replace("[youtube]", "").strip()
             msg = f"កំហុសក្នុងការទាញយក៖ {clean_err[:120]}"
         return VideoDownloadResult(success=False, error_message=msg)
-    except Exception as e:
-        return VideoDownloadResult(success=False, error_message=f"កំហុសបច្ចេកទេស៖ {str(e)[:120]}")
+
+    return VideoDownloadResult(success=False, error_message="មិនអាចទាញយកព័ត៌មានវីដេអូបានទេ។")
 
 async def download_video_async(url: str, quality: str = "best") -> VideoDownloadResult:
     """Asynchronously download video with chosen quality."""
@@ -325,7 +369,16 @@ def _sync_download_thumbnail(url: str, download_folder: Path) -> Optional[str]:
                             return str(path)
 
         # yt-dlp thumbnail extraction
-        ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True}
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'skip_download': True,
+            'source_address': '0.0.0.0',
+            'extractor_args': YOUTUBE_EXTRACTOR_ARGS,
+        }
+        cookiefile = _get_youtube_cookiefile()
+        if cookiefile:
+            ydl_opts['cookiefile'] = cookiefile
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             if not info:

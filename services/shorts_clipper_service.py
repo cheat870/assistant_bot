@@ -31,6 +31,13 @@ async def auto_clip_viral_shorts(url: str) -> Tuple[bool, Optional[str], str, Op
             'writesubtitles': True,
             'writeautomaticsub': True,
             'subtitleslangs': ['en', 'km'],
+            'source_address': '0.0.0.0',
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'ios', 'tv_embedded'],
+                    'player_skip': ['webpage', 'configs']
+                }
+            }
         }
 
         loop = asyncio.get_event_loop()
