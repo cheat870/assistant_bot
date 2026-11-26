@@ -115,7 +115,7 @@ def _clean_music_metadata(raw_title: str, raw_uploader: str) -> tuple[str, str]:
 
     return title.strip(), uploader.strip()
 
-def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
+def _search_and_download_song_sync(query: str, prefer_soundcloud: bool = False) -> Dict[str, Any]:
     """
     Search and download full-length audio (MP3 320kbps / M4A) with smart candidate filtering.
     - Strategy 1: Fast single-step YouTube search & direct download with multi-client anti-bot bypass.
@@ -301,9 +301,13 @@ def _search_and_download_song_sync(query: str) -> Dict[str, Any]:
         return None
 
     # Priority Order:
+    # If prefer_soundcloud is True -> SoundCloud first (instant 128k audio)
     # If Cambodian song -> YouTube first (100% catalog coverage), then SoundCloud fallback
     # If Western/International song -> SoundCloud first (instant 128k audio), then YouTube fallback
-    strategies = [_try_download_youtube, _try_download_soundcloud] if is_khmer else [_try_download_soundcloud, _try_download_youtube]
+    if prefer_soundcloud:
+        strategies = [_try_download_soundcloud, _try_download_youtube]
+    else:
+        strategies = [_try_download_youtube, _try_download_soundcloud] if is_khmer else [_try_download_soundcloud, _try_download_youtube]
     for strat in strategies:
         result = strat()
         if result:

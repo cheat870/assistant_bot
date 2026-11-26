@@ -2,12 +2,15 @@ import os
 import re
 import uuid
 import asyncio
+import logging
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 import httpx
 import yt_dlp
 
 from config import DOWNLOAD_DIR, MAX_FILE_SIZE_MB
+
+logger = logging.getLogger(__name__)
 
 # URL pattern to match common video links
 URL_REGEX = re.compile(
@@ -243,6 +246,32 @@ def _sync_download(url: str, download_folder: Path, quality: str = "best", audio
     oembed_info: Optional[Dict[str, str]] = None
     if is_youtube_url(url):
         oembed_info = fetch_youtube_oembed(url)
+        o_title = (oembed_info.get("title") if oembed_info else "") or ""
+        is_music_content = any(k in o_title.lower() for k in [
+            "audio", "song", "music", "mv", "slow", "remix", "beat", "cover", "prod", "lyrics", "ft.", "feat", "official", "remake"
+        ]) or any(k in o_title for k in ["បទ", "ចម្រៀង", "ភ្លេង"])
+
+        # Direct fast audio bypass for YouTube music tracks on cloud datacenter IPs
+        if (audio_only or is_music_content) and not _get_youtube_cookiefile():
+            try:
+                from services.music_service import _search_and_download_song_sync
+                search_query = clean_song_title(o_title) if o_title else url
+                logger.info(f"Direct fast audio fallback for YouTube link: '{search_query}'")
+                song_res = _search_and_download_song_sync(search_query, prefer_soundcloud=True)
+                if song_res and isinstance(song_res, dict) and song_res.get("file_path") and os.path.exists(song_res["file_path"]):
+                    f_size = round(os.path.getsize(song_res["file_path"]) / (1024 * 1024), 2)
+                    return VideoDownloadResult(
+                        success=True,
+                        file_path=song_res["file_path"],
+                        title=song_res.get("title") or o_title or "Audio Track",
+                        duration=song_res.get("duration"),
+                        thumbnail_url=oembed_info.get("thumbnail_url") if oembed_info else song_res.get("thumbnail"),
+                        uploader=song_res.get("performer") or (oembed_info.get("author_name") if oembed_info else "YouTube"),
+                        file_size_mb=f_size,
+                        is_audio=True
+                    )
+            except Exception as e_fast_audio:
+                logger.warning(f"Direct fast audio fallback failed: {e_fast_audio}")
 
     unique_id = str(uuid.uuid4())[:8]
     output_template = str(download_folder / f"media_{unique_id}_%(id)s.%(ext)s")
@@ -265,11 +294,9 @@ def _sync_download(url: str, download_folder: Path, quality: str = "best", audio
 
     cookiefile = _get_youtube_cookiefile()
 
-    # Multi-client strategy list to bypass YouTube datacenter blocks on Render/AWS/GCP
+    # Fast client strategy for video downloads
     client_strategies = [
-        ['android', 'ios', 'tv_embedded'],
-        ['tv_embedded', 'android'],
-        ['android'],
+        ['android', 'ios'],
     ]
 
     last_error: Optional[Exception] = None
@@ -282,8 +309,10 @@ def _sync_download(url: str, download_folder: Path, quality: str = "best", audio
             'quiet': True,
             'no_warnings': True,
             'source_address': '0.0.0.0',
-            'socket_timeout': 30,
-            'max_filesize': MAX_FILE_SIZE_MB * 1024 * 1024,
+            'socket_timeout': 10,
+            'retries': 1,
+            'fragment_retries': 1,
+            'extractor_retries': 1,
             'extractor_args': {
                 'youtube': {
                     'player_client': client_list,
@@ -392,16 +421,16 @@ def _sync_download(url: str, download_folder: Path, quality: str = "best", audio
                     from services.music_service import _search_and_download_song_sync
                     search_query = clean_song_title(o_title) if o_title else (o_title or url)
                     logger.info(f"Triggering automated audio stream fallback for blocked YouTube link: '{search_query}'")
-                    song_res = _search_and_download_song_sync(search_query)
-                    if song_res and getattr(song_res, "file_path", None) and os.path.exists(song_res.file_path):
-                        f_size = round(os.path.getsize(song_res.file_path) / (1024 * 1024), 2)
+                    song_res = _search_and_download_song_sync(search_query, prefer_soundcloud=True)
+                    if song_res and isinstance(song_res, dict) and song_res.get("file_path") and os.path.exists(song_res["file_path"]):
+                        f_size = round(os.path.getsize(song_res["file_path"]) / (1024 * 1024), 2)
                         return VideoDownloadResult(
                             success=True,
-                            file_path=song_res.file_path,
-                            title=song_res.title or o_title or "Audio Track",
-                            duration=getattr(song_res, "duration", None),
-                            thumbnail_url=o_thumb or getattr(song_res, "thumbnail_url", None),
-                            uploader=o_author or getattr(song_res, "artist", "YouTube"),
+                            file_path=song_res["file_path"],
+                            title=song_res.get("title") or o_title or "Audio Track",
+                            duration=song_res.get("duration"),
+                            thumbnail_url=o_thumb or song_res.get("thumbnail"),
+                            uploader=song_res.get("performer") or o_author or "YouTube",
                             file_size_mb=f_size,
                             is_audio=True
                         )
@@ -450,12 +479,86 @@ def _sync_download(url: str, download_folder: Path, quality: str = "best", audio
     return VideoDownloadResult(success=False, error_message="មិនអាចទាញយកព័ត៌មានវីដេអូបានទេ។")
 
 async def download_video_async(url: str, quality: str = "best") -> VideoDownloadResult:
-    """Asynchronously download video with chosen quality."""
-    return await asyncio.to_thread(_sync_download, url, DOWNLOAD_DIR, quality, False)
+    """Asynchronously download video with chosen quality and hard timeout protection."""
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(_sync_download, url, DOWNLOAD_DIR, quality, False),
+            timeout=35.0
+        )
+    except asyncio.TimeoutError:
+        logger.warning(f"download_video_async timed out after 35s for {url}")
+        if is_youtube_url(url):
+            oembed_info = fetch_youtube_oembed(url)
+            o_title = (oembed_info.get("title") if oembed_info else "") or ""
+            o_thumb = (oembed_info.get("thumbnail_url") if oembed_info else "") or ""
+            o_author = (oembed_info.get("author_name") if oembed_info else "") or "YouTube"
+            try:
+                from services.music_service import _search_and_download_song_sync
+                search_query = clean_song_title(o_title) if o_title else url
+                song_res = await asyncio.to_thread(_search_and_download_song_sync, search_query, True)
+                if song_res and isinstance(song_res, dict) and song_res.get("file_path") and os.path.exists(song_res["file_path"]):
+                    f_size = round(os.path.getsize(song_res["file_path"]) / (1024 * 1024), 2)
+                    return VideoDownloadResult(
+                        success=True,
+                        file_path=song_res["file_path"],
+                        title=song_res.get("title") or o_title or "Audio Track",
+                        duration=song_res.get("duration"),
+                        thumbnail_url=o_thumb or song_res.get("thumbnail"),
+                        uploader=song_res.get("performer") or o_author,
+                        file_size_mb=f_size,
+                        is_audio=True
+                    )
+            except Exception as e_m:
+                logger.warning(f"Timeout music fallback error: {e_m}")
+
+            return VideoDownloadResult(
+                success=False,
+                error_message="ការទាញយកពី YouTube ចំណាយពេលយូរពេក (Timeout) ដោយសារប្រព័ន្ធ YouTube កម្រិតល្បឿន Server។ សូមទាញយកជា MP3 ជំនួសវិញ!",
+                title=o_title or "YouTube Video",
+                uploader=o_author,
+                thumbnail_url=o_thumb
+            )
+        return VideoDownloadResult(
+            success=False,
+            error_message="ការទាញយកចំណាយពេលយូរពេក (Timeout លើសពី 35 វិនាទី)។ សូមសាកល្បងម្តងទៀត!"
+        )
 
 async def download_audio_async(url: str) -> VideoDownloadResult:
-    """Asynchronously extract and download audio/mp3."""
-    return await asyncio.to_thread(_sync_download, url, DOWNLOAD_DIR, "best", True)
+    """Asynchronously extract and download audio/mp3 with timeout protection."""
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(_sync_download, url, DOWNLOAD_DIR, "best", True),
+            timeout=35.0
+        )
+    except asyncio.TimeoutError:
+        logger.warning(f"download_audio_async timed out after 35s for {url}")
+        if is_youtube_url(url):
+            oembed_info = fetch_youtube_oembed(url)
+            o_title = (oembed_info.get("title") if oembed_info else "") or ""
+            o_thumb = (oembed_info.get("thumbnail_url") if oembed_info else "") or ""
+            o_author = (oembed_info.get("author_name") if oembed_info else "") or "YouTube"
+            try:
+                from services.music_service import _search_and_download_song_sync
+                search_query = clean_song_title(o_title) if o_title else url
+                song_res = await asyncio.to_thread(_search_and_download_song_sync, search_query, True)
+                if song_res and isinstance(song_res, dict) and song_res.get("file_path") and os.path.exists(song_res["file_path"]):
+                    f_size = round(os.path.getsize(song_res["file_path"]) / (1024 * 1024), 2)
+                    return VideoDownloadResult(
+                        success=True,
+                        file_path=song_res["file_path"],
+                        title=song_res.get("title") or o_title or "Audio Track",
+                        duration=song_res.get("duration"),
+                        thumbnail_url=o_thumb or song_res.get("thumbnail"),
+                        uploader=song_res.get("performer") or o_author,
+                        file_size_mb=f_size,
+                        is_audio=True
+                    )
+            except Exception as e_m:
+                logger.warning(f"Timeout audio fallback error: {e_m}")
+        return VideoDownloadResult(
+            success=False,
+            error_message="ការទាញយកសំឡេងចំណាយពេលយូរពេក (Timeout)។"
+        )
 
 def _sync_download_thumbnail(url: str, download_folder: Path) -> Optional[str]:
     """Download highest resolution thumbnail / cover image."""

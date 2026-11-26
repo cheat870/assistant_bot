@@ -298,6 +298,20 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
         parse_mode="Markdown"
     )
     
+    if is_youtube_url(url):
+        from services.video_downloader import fetch_youtube_oembed
+        o_fast = fetch_youtube_oembed(url)
+        if o_fast and o_fast.get("title"):
+            try:
+                await status_msg.edit_text(
+                    f"⏳ *កំពុងទាញយក៖* `{o_fast['title'][:55]}`\n"
+                    f"👤 Channel: *{o_fast.get('author_name', 'YouTube')[:35]}*\n\n"
+                    f"សូមរង់ចាំបន្តិចណា៎! 🚀",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
+
     await chat.send_action("record_video")
     
     # Download the video asynchronously
