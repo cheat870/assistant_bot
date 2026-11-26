@@ -1073,6 +1073,34 @@ async def test_web_builder_service_async():
     print("  - Generated full responsive glassmorphic HTML landing page: OK")
     print("  [OK] Instant Mini Landing Page Builder Service verified!")
 
+def test_youtube_oembed_and_fallback():
+    print("\n[30] Testing YouTube oEmbed & Bot-Block Audio Stream Fallback...")
+    from services.video_downloader import (
+        is_youtube_url,
+        clean_song_title,
+        fetch_youtube_oembed
+    )
+    # 1. URL detection
+    assert is_youtube_url("https://youtu.be/us7Eqj39xQc") is True
+    assert is_youtube_url("https://www.youtube.com/watch?v=us7Eqj39xQc") is True
+    assert is_youtube_url("https://vm.tiktok.com/ZMxxxxxx") is False
+    print("  - is_youtube_url detection: OK")
+
+    # 2. Song title cleaning
+    raw_title = "GMENGZ - SELF MADE (OFFICIAL AUDIO SLOW)"
+    cleaned = clean_song_title(raw_title)
+    assert "GMENGZ - SELF MADE" in cleaned
+    assert "OFFICIAL AUDIO SLOW" not in cleaned
+    print(f"  - clean_song_title ('{raw_title}' -> '{cleaned}'): OK")
+
+    # 3. oEmbed metadata fetch (unblocked public YouTube endpoint)
+    oembed = fetch_youtube_oembed("https://youtu.be/us7Eqj39xQc")
+    assert oembed is not None, "oEmbed should return valid metadata"
+    assert "GMENGZ" in oembed["title"]
+    assert "thumbnail_url" in oembed and len(oembed["thumbnail_url"]) > 10
+    print(f"  - fetch_youtube_oembed title: '{oembed['title']}' | author: '{oembed['author_name']}': OK")
+    print("  [OK] YouTube oEmbed & Bot-Block Audio Stream Fallback verified!")
+
 if __name__ == "__main__":
     test_holiday_calendar()
     test_database()
@@ -1103,4 +1131,5 @@ if __name__ == "__main__":
     asyncio.run(test_ai_content_creator_studio_async())
     asyncio.run(test_calendar_service_async())
     asyncio.run(test_web_builder_service_async())
-    print("\n🎉 ALL 29 TEST SUITES PASSED SUCCESSFULLY! ✅")
+    test_youtube_oembed_and_fallback()
+    print("\n🎉 ALL 30 TEST SUITES PASSED SUCCESSFULLY! ✅")

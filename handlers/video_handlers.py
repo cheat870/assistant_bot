@@ -8,6 +8,7 @@ from telegram.ext import ContextTypes
 
 from services.video_downloader import (
     extract_video_url,
+    is_youtube_url,
     download_video_async,
     download_audio_async,
     download_thumbnail_hd,
@@ -303,6 +304,19 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
     result = await download_video_async(url)
     
     if not result.success:
+        if is_youtube_url(url) and result.title:
+            err_text = f"❌ *ការទាញយកមិនបានសម្រេច!*\n\n{result.error_message}"
+            yt_buttons = [
+                [InlineKeyboardButton("🎵 ទាញយកជា MP3 (Bypass Bot Block)", callback_data=f"dlmp3_{token}")],
+                [InlineKeyboardButton("🔗 បើកមើលលើ YouTube Browser", url=url)],
+                [InlineKeyboardButton("📻 ស្តាប់ក្នុង Channel @Song182", url="https://t.me/Song182")]
+            ]
+            try:
+                await status_msg.edit_text(err_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(yt_buttons), disable_web_page_preview=False)
+            except Exception:
+                await update.message.reply_text(err_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(yt_buttons))
+            return
+
         err_text = f"❌ *ការទាញយកមិនបានសម្រេច!*\n\n{result.error_message}"
         try:
             await status_msg.edit_text(err_text, parse_mode="Markdown", disable_web_page_preview=True)
@@ -432,33 +446,53 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
         
     await chat.send_action("upload_video")
     
-    # Send the video file
+    # Send the media file (Audio or Video)
     try:
-        caption = (
-            f"🎬 *{result.title}*\n"
-            f"👤 អ្នកបង្កើត: {result.uploader}\n"
-            f"📦 ទំហំ: {result.file_size_mb} MB\n"
-            f"🔗 {url}\n\n"
-            f"✨ ទាញយកដោយ Smart Assistant Bot 🚀"
-        )
-        
-        sent_video = None
-        with open(result.file_path, "rb") as video_file:
-            sent_video = await update.message.reply_video(
-                video=video_file,
-                caption=caption,
-                duration=result.duration,
-                supports_streaming=True,
-                reply_markup=reply_markup,
-                parse_mode="Markdown",
-                read_timeout=900.0,
-                write_timeout=900.0,
+        sent_media = None
+        if result.is_audio:
+            caption = (
+                f"🎵 *{result.title}*\n"
+                f"👤 អ្នកបង្កើត: {result.uploader}\n"
+                f"📦 ទំហំ: {result.file_size_mb} MB\n"
+                f"🔗 {url}\n\n"
+                f"✨ ទាញយកដោយ Smart Assistant Bot (Audio Bypass) 🚀"
             )
+            with open(result.file_path, "rb") as audio_file:
+                sent_media = await update.message.reply_audio(
+                    audio=audio_file,
+                    title=result.title,
+                    performer=result.uploader,
+                    duration=result.duration,
+                    caption=caption,
+                    reply_markup=reply_markup,
+                    parse_mode="Markdown",
+                    read_timeout=900.0,
+                    write_timeout=900.0,
+                )
+        else:
+            caption = (
+                f"🎬 *{result.title}*\n"
+                f"👤 អ្នកបង្កើត: {result.uploader}\n"
+                f"📦 ទំហំ: {result.file_size_mb} MB\n"
+                f"🔗 {url}\n\n"
+                f"✨ ទាញយកដោយ Smart Assistant Bot 🚀"
+            )
+            with open(result.file_path, "rb") as video_file:
+                sent_media = await update.message.reply_video(
+                    video=video_file,
+                    caption=caption,
+                    duration=result.duration,
+                    supports_streaming=True,
+                    reply_markup=reply_markup,
+                    parse_mode="Markdown",
+                    read_timeout=900.0,
+                    write_timeout=900.0,
+                )
             
         log_download(chat.id, url, result.title)
 
         # Automatic Channel Archiving to @Song182 (-1003994142170)
-        if sent_video and sent_video.video:
+        if sent_media and getattr(sent_media, "video", None):
             try:
                 from services.music_archive_service import archive_video_to_channel
                 asyncio.create_task(
@@ -468,14 +502,34 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
                         video_data={
                             "title": result.title,
                             "uploader": result.uploader,
-                            "duration": result.duration,
                             "url": url,
+                            "duration": result.duration or 0,
                         },
-                        sent_video_file_id=sent_video.video.file_id
+                        sent_video_file_id=sent_media.video.file_id
                     )
                 )
-            except Exception as e_arch:
-                logger.warning(f"Could not auto-archive video to channel: {e_arch}")
+            except Exception as e_v_arch:
+                logger.warning(f"Could not auto-archive video: {e_v_arch}")
+        elif sent_media and getattr(sent_media, "audio", None):
+            try:
+                from services.music_archive_service import archive_song_to_channel
+                dur_sec = result.duration or 0
+                asyncio.create_task(
+                    archive_song_to_channel(
+                        bot=context.bot,
+                        user=update.effective_user,
+                        song_data={
+                            "title": result.title,
+                            "performer": result.uploader,
+                            "duration": dur_sec,
+                            "duration_str": f"{dur_sec // 60}:{dur_sec % 60:02d}" if dur_sec else "Unknown",
+                            "query": url,
+                        },
+                        sent_audio_file_id=sent_media.audio.file_id
+                    )
+                )
+            except Exception as e_a_arch:
+                logger.warning(f"Could not auto-archive fallback audio: {e_a_arch}")
         
         try:
             await status_msg.delete()

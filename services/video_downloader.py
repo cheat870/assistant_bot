@@ -33,6 +33,42 @@ def is_tiktok_url(url: str) -> bool:
     """Check if URL is from TikTok."""
     return bool(re.search(r'tiktok\.com', url, re.IGNORECASE))
 
+def is_youtube_url(url: str) -> bool:
+    """Check if URL is from YouTube or YouTube Music."""
+    return bool(re.search(r'(?:youtube\.com|youtu\.be)', url, re.IGNORECASE))
+
+def clean_song_title(title: str) -> str:
+    """Clean video title to extract the core artist & song name for music search."""
+    clean = re.sub(r'[\(\[\{][^\)\]\}]*(?:official|audio|video|slow|remix|mv|lyric|lyrics|4k|hd|prod|beat)[^\)\]\}]*[\)\]\}]', '', title, flags=re.IGNORECASE)
+    clean = re.sub(r'(?:official\s*audio|official\s*video|official\s*music\s*video|slow\s*remix|remix|slowed\s*\+\s*reverb)', '', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'\s+', ' ', clean).strip()
+    return clean or title
+
+def fetch_youtube_oembed(url: str) -> Optional[Dict[str, str]]:
+    """
+    Fetch authentic video metadata from YouTube public oEmbed endpoint without API key or IP blocks.
+    Endpoint: https://www.youtube.com/oembed?url=...&format=json
+    """
+    try:
+        import urllib.parse
+        encoded_url = urllib.parse.quote(url, safe='')
+        oembed_url = f"https://www.youtube.com/oembed?url={encoded_url}&format=json"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        }
+        with httpx.Client(timeout=6.0, headers=headers, follow_redirects=True) as client:
+            resp = client.get(oembed_url)
+            if resp.status_code == 200:
+                data = resp.json()
+                return {
+                    "title": data.get("title", ""),
+                    "author_name": (data.get("author_name", "") or "").strip(),
+                    "thumbnail_url": data.get("thumbnail_url", ""),
+                }
+    except Exception as e:
+        logger.debug(f"oEmbed fetch failed for {url}: {e}")
+    return None
+
 class VideoDownloadResult:
     def __init__(
         self,
@@ -203,6 +239,11 @@ def _sync_download(url: str, download_folder: Path, quality: str = "best", audio
         if tiktok_res.success:
             return tiktok_res
 
+    # Pre-fetch authentic metadata via public oEmbed if YouTube
+    oembed_info: Optional[Dict[str, str]] = None
+    if is_youtube_url(url):
+        oembed_info = fetch_youtube_oembed(url)
+
     unique_id = str(uuid.uuid4())[:8]
     output_template = str(download_folder / f"media_{unique_id}_%(id)s.%(ext)s")
     
@@ -318,12 +359,71 @@ def _sync_download(url: str, download_folder: Path, quality: str = "best", audio
     # If all client strategies were exhausted
     if last_error:
         err_str = str(last_error)
+        err_lower = err_str.lower()
         if is_tiktok_url(url):
             fallback_res = _download_tiktok_api(url, download_folder, audio_only=audio_only)
             if fallback_res.success:
                 return fallback_res
-                
-        err_lower = err_str.lower()
+
+        # YouTube Datacenter IP Block / Bot Block handling
+        if is_youtube_url(url):
+            o_title = (oembed_info.get("title") if oembed_info else "") or ""
+            o_author = (oembed_info.get("author_name") if oembed_info else "") or ""
+            o_thumb = (oembed_info.get("thumbnail_url") if oembed_info else "") or ""
+
+            is_bot_blocked = any(k in err_lower for k in [
+                "failed to extract any player response",
+                "bot",
+                "sign in",
+                "login",
+                "confirm you’re not a bot",
+                "confirm you're not a bot",
+                "unavailable",
+                "does not exist"
+            ])
+
+            is_music_content = any(k in o_title.lower() for k in [
+                "audio", "song", "music", "mv", "slow", "remix", "beat", "cover", "prod", "lyrics", "ft.", "feat", "official"
+            ]) or any(k in o_title for k in ["បទ", "ចម្រៀង", "ភ្លេង"])
+
+            # If user wants audio or if title is music content, trigger automated audio stream fallback
+            if is_bot_blocked and (audio_only or is_music_content):
+                try:
+                    from services.music_service import _search_and_download_song_sync
+                    search_query = clean_song_title(o_title) if o_title else (o_title or url)
+                    logger.info(f"Triggering automated audio stream fallback for blocked YouTube link: '{search_query}'")
+                    song_res = _search_and_download_song_sync(search_query)
+                    if song_res and getattr(song_res, "file_path", None) and os.path.exists(song_res.file_path):
+                        f_size = round(os.path.getsize(song_res.file_path) / (1024 * 1024), 2)
+                        return VideoDownloadResult(
+                            success=True,
+                            file_path=song_res.file_path,
+                            title=song_res.title or o_title or "Audio Track",
+                            duration=getattr(song_res, "duration", None),
+                            thumbnail_url=o_thumb or getattr(song_res, "thumbnail_url", None),
+                            uploader=o_author or getattr(song_res, "artist", "YouTube"),
+                            file_size_mb=f_size,
+                            is_audio=True
+                        )
+                except Exception as e_m:
+                    logger.warning(f"Audio stream fallback failed: {e_m}")
+
+            # If video was requested or audio fallback failed, format informative message with metadata
+            if is_bot_blocked:
+                title_disp = f"\n🎬 **ចំណងជើង៖** `{o_title}`" if o_title else ""
+                author_disp = f"\n👤 **Channel៖** `{o_author}`" if o_author else ""
+                msg = (
+                    f"⚠️ *ប្រព័ន្ធ YouTube បានរារាំងការទាញយកវីដេអូនៅលើ Cloud Server (YouTube Bot Block)!*{title_disp}{author_disp}\n\n"
+                    "💡 _ដោយសារ Cloud Server (Render) ត្រូវបាន YouTube កម្រិត IP លោកអ្នកអាចចុចប៊ូតុងខាងក្រោមដើម្បីទាញយកជា MP3 ឬបើកមើលលើ Browser!_"
+                )
+                return VideoDownloadResult(
+                    success=False,
+                    error_message=msg,
+                    title=o_title or "YouTube Video",
+                    uploader=o_author or "YouTube",
+                    thumbnail_url=o_thumb
+                )
+
         if "file is larger than max-filesize" in err_lower:
             msg = f"ឯកសារនេះមានទំហំធំជាង {MAX_FILE_SIZE_MB} MB ដែលលើសពីកម្រិត Telegram Bot អាចផ្ញើបាន។"
         elif "private video" in err_lower or "login" in err_lower or "sign in" in err_lower:
@@ -339,7 +439,13 @@ def _sync_download(url: str, download_folder: Path, quality: str = "best", audio
             clean_err = re.sub(r'please report this issue.*', '', clean_err, flags=re.IGNORECASE).strip()
             clean_err = clean_err.replace("ERROR:", "").replace("[youtube]", "").strip()
             msg = f"កំហុសក្នុងការទាញយក៖ {clean_err[:120]}"
-        return VideoDownloadResult(success=False, error_message=msg)
+        return VideoDownloadResult(
+            success=False,
+            error_message=msg,
+            title=oembed_info.get("title") if oembed_info else None,
+            uploader=oembed_info.get("author_name") if oembed_info else None,
+            thumbnail_url=oembed_info.get("thumbnail_url") if oembed_info else None
+        )
 
     return VideoDownloadResult(success=False, error_message="មិនអាចទាញយកព័ត៌មានវីដេអូបានទេ។")
 
